@@ -1,7 +1,7 @@
 // Service worker: מטמון מקומי. בקשות הרשת של האפליקציה לא שולחות את התיק.
 // התראת דחיפה, אם נרשמת, מציגה רק את הטקסט הכללי שהשרת שלח.
-const CACHE = 'pf-v3';
-const SHELL = ['./', './index.html', './styles.css', './js/app.js', './js/logic.js', './js/sample.js', './js/onboard.js', './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './data/signals.json'];
+const CACHE = 'pf-v4';
+const SHELL = ['./', './index.html', './styles.css', './js/app.js', './js/logic.js', './js/sample.js', './js/onboard.js', './js/listings.js', './js/backup.js', './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './data/signals.json'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', e => {

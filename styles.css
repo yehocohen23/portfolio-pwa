@@ -59,6 +59,8 @@ body.is-onboard .tabs,body.is-onboard #moreBtn,body.is-onboard #simBanner{displa
 .ob-choice{display:block;width:100%;text-align:start;margin:8px 0;min-height:48px;padding:12px 14px;border-radius:12px;background:var(--card);color:var(--tx);border:1px solid var(--line);font:inherit;font-size:16px}
 .ob-choice.on{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
 .ob-err{color:var(--r);font-size:13.5px;white-space:pre-wrap;min-height:1.2em}
+.ob-chips{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.ob-chips .ob-choice{width:auto;flex:1 1 42%;margin:0;min-height:44px;text-align:center}
 .ob-actions{position:sticky;bottom:0;display:flex;gap:8px;background:linear-gradient(transparent,var(--bg) 28%);padding:18px 0 calc(8px + env(safe-area-inset-bottom))}
 .ob-actions .b{flex:1;min-height:48px}
 .c0{color:#94a3b8}.c1{color:#38bdf8}.c2{color:#34d399}

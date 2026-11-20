@@ -1,9 +1,10 @@
 // אפליקציית ניתוח תיק — אבטיפוס v1. ניתוח והמלצה בלבד, ללא מסחר.
 // כל נתוני התיק נשמרים ב-localStorage של הדפדפן בלבד. אין שליחה לשרת.
 import { THRESHOLDS as TH, ANCHORS, TAX_NOTE, classifyDowntrend, concentration, idleCash, projectSeries,
-  requiredDeposit, idleCostYears, eventLabel, pct, num, daysBetween } from './logic.js';
+  requiredDeposit, idleCostYears, eventLabel, pct, num, daysBetween, suggestedRiskForYears } from './logic.js';
 import { SAMPLE_PORTFOLIO, CSV_TEMPLATE } from './sample.js';
-import { emptyPortfolio, mode, renderOnboard, renderGate, onboardAct, acceptImport, RISK_Q } from './onboard.js';
+import { emptyPortfolio, migratePortfolio, mode, renderOnboard, renderGate, onboardAct, acceptImport, suggestHtml, RISK_Q } from './onboard.js';
+import { packBackup, validateBackup, portfolioFromBackup, encryptBackup, decryptBackup, shareOrDownload } from './backup.js';
 
 const KEY = 'pf.v1';
 const $ = s => document.querySelector(s);
@@ -25,12 +26,12 @@ function load() {
   try {
     const s = JSON.parse(localStorage.getItem(KEY));
     if (s && Array.isArray(s.holdings)) {
-      s.settings = Object.assign({ E_ils: null, M: null, cashSince: null, rRef: null, rScen: [null, null, null], mode: 'equal' }, s.settings || {});
-      if (!Array.isArray(s.settings.rScen) || s.settings.rScen.length !== 3) s.settings.rScen = [null, null, null];
-      s.journal = s.journal || [];
-      s.reviewed = s.reviewed || {};
-      s.profile = s.profile || {};
-      return s;
+      const step = s.onboarding?.step;
+      const hadGoals = Array.isArray(s.goals) && s.goals.length > 0;
+      const m = migratePortfolio(s);
+      const repaired = (!hadGoals && m.goals?.length) || (m.onboarding?.active && !m.onboarded && step !== m.onboarding?.step);
+      if (repaired) localStorage.setItem(KEY, JSON.stringify(m));
+      return m;
     }
   } catch {}
   return emptyPortfolio();
@@ -177,6 +178,29 @@ function buildAlerts(V) {
 }
 
 // ---------- מסכים ----------
+function viewGoals(V) {
+  const goals = S.goals || [];
+  if (!goals.length) return '';
+  const fx = SIG?.fx?.USDILS;
+  const r = S.settings?.rScen?.[1];
+  return `<h2>יעדים</h2>` + goals.map(g => {
+    const yearsLeft = Number.isFinite(+g.year) ? +g.year - new Date().getFullYear() : null;
+    const sug = g.suggestedRisk || suggestedRiskForYears(yearsLeft);
+    const targetUsd = g.amount == null ? null : (g.currency === 'ILS' ? (Number.isFinite(fx) ? g.amount / fx : null) : g.amount);
+    const ratio = targetUsd > 0 && Number.isFinite(V.total) ? V.total / targetUsd : null;
+    let proj = '<div class="mut">חסר תרחיש בסיס או שנת יעד — אין המחשה.</div>';
+    if (Number.isFinite(r) && yearsLeft > 0 && Number.isFinite(V.total)) {
+      const end = projectSeries({ B0: V.total, P: 0, fd: 0, fa: 0, r, years: yearsLeft, mode: S.settings.mode || 'equal' }).at(-1);
+      proj = `<div class="small">המחשה ל־${yearsLeft} שנים בלי הפקדה חדשה, לפי תרחיש הבסיס: ${g.currency === 'ILS' && Number.isFinite(fx) ? '₪' + num(end * fx, 0) : usd(end)}. לא תחזית.</div>`;
+    }
+    const pctTxt = ratio == null ? '<span class="chip miss">חסר סכום או שער</span>' : (ratio >= 1 ? 'שווי התיק כולו מכסה את היעד' : P(Math.min(ratio, 9.99)) + ' משווי התיק כולו מול היעד');
+    return `<div class="card goal"><div class="row"><b>${esc(g.label || g.key || 'יעד')}</b><span>${g.amount == null ? '<span class="chip miss">חסר סכום</span>' : (g.currency === 'ILS' ? '<span class="ltr">₪' + num(g.amount, 0) + '</span>' : usd(g.amount))}</span></div>
+      <div class="mut">${g.year ? 'שנת יעד ' + esc(g.year) + (yearsLeft != null ? ' · עוד ' + yearsLeft + ' שנים' : '') : '<span class="chip miss">חסרה שנה</span>'}${g.currency ? ' · ' + esc(g.currency) : ''}</div>
+      ${sug ? `<div class="small">רמת סיכון מוצעת: <b>${esc(sug.level)}</b> — ${esc(sug.why)} <span class="chip prop">הצעה לאימות</span><div class="mut">${esc(sug.source)} (${esc(sug.date)})</div></div>` : ''}
+      ${ratio == null ? '' : `<div class="bar"><span class="w${Math.max(0, Math.min(100, Math.round(Math.min(ratio, 1) * 100)))}"></span></div>`}
+      <div class="small">${pctTxt}</div><div class="mut">אותו שווי נספר מול כל יעד. אין כאן חלוקה של הכסף בין יעדים.</div>${proj}</div>`;
+  }).join('');
+}
 function viewPortfolio(V, A) {
   const groups = {};
   for (const i of V.items) if (Number.isFinite(i.usd)) groups[i.kind] = (groups[i.kind] || 0) + i.usd;
@@ -189,6 +213,7 @@ function viewPortfolio(V, A) {
     <div class="row small"><span>שינוי מיום המסחר הקודם</span><span class="ltr ${V.chg < 0 ? 'neg' : 'pos'}">${usd(V.total - V.prev)} (${pct(V.chg, 2)})</span></div>
     <div class="note">מחירים: ${esc(SIG.symbols[0].closeDate)} · שער ₪/$ ${SIG.fx.USDILS} מ-${esc(SIG.fx.date)} (${esc(SIG.fx.source)}) · ${esc(SIG.notice)}</div>
   </div>
+  ${viewGoals(V)}
   <h2>פילוח לפי סוג נכס</h2>
   <div class="card">${Object.entries(groups).sort((a, b) => b[1] - a[1]).map(([k, v]) => `
     <div class="row small"><span>${KIND[k]}${k === 'crypto' ? ' <span class="chip">תצוגה וסיכון בלבד</span>' : ''}</span><span>${usd(v)} · ${P(v / V.total)}</span></div>
@@ -324,11 +349,9 @@ function viewJournal(A) {
 function viewMore() {
   const st = S.settings, rk = S.risk, pf = S.profile || {};
   const yn = v => v == null ? '<span class="chip miss">חסר</span>' : v ? 'כן' : 'לא';
-  const ast = S.holdings.find(h => h.employer && h.symbol === 'ASTS');
   return `<h2>עליך</h2><div class="card small">
     <div>תושבות מס: ${pf.taxResidency === 'other' ? 'אחר' : pf.taxResidency === 'IL' ? 'ישראל' : '<span class="chip miss">חסר</span>'}</div>
-    <div>בעל מניות מהותי: ${yn(pf.materialShareholder)}</div>
-    <div>תוכנית עובדים AST SpaceMobile: ${yn(pf.employerPlan)}${pf.employerPlan && !ast ? ' · <span class="chip miss">כמות ASTS חסרה</span>' : ''}</div>
+    ${typeof pf.materialShareholder === 'boolean' ? `<div>בעל מניות מהותי (שמור ממכשיר): ${yn(pf.materialShareholder)}. ברירת המחדל לניתוח היא 25%.</div>` : '<div class="mut">מס רווח הון: ברירת מחדל 25% ליחיד. בעל מניות מהותי עד 30% — ראה את תזכורת המס בהתראות.</div>'}
   </div>
   <h2>שאלון סיכון קצר</h2><div class="card">
     ${RISK_Q.map((q, k) => `<div class="q"><label for="q${k}">${q[0]}</label><select id="q${k}">${q[1].map((o, j) => `<option value="${j}"${rk?.answers?.[k] == j ? ' selected' : ''}>${o}</option>`).join('')}</select></div>`).join('')}
@@ -362,7 +385,12 @@ function viewMore() {
   </div>
   <h2>פרטיות וגיבוי</h2><div class="card small">
     <ul><li>כל הנתונים נשמרים רק בדפדפן במכשיר הזה. אין שרת, אין חשבון, אין סיסמאות.</li><li>אין חיבור לחשבונות מסחר. האפליקציה רק מנתחת וממליצה.</li><li>קובץ האותות מכיל רשימת סמלים רחבה בלבד; ההצלבה מול הכמויות נעשית כאן.</li></ul>
-    <div class="btns"><button class="b sec" data-act="export">ייצוא גיבוי (JSON)</button><button class="b sec" data-act="loadDemo">טען נתוני הדגמה</button><button class="b danger" data-act="restartOnboarding">התחל אונבורדינג מחדש</button></div></div>`;
+    <label for="backupPass">סיסמה לגיבוי (אופציונלי)</label><input id="backupPass" type="password" autocomplete="new-password">
+    <div class="btns"><button class="b" data-act="export">ייצוא גיבוי</button></div>
+    <label for="backupFile">שחזור מקובץ</label><input id="backupFile" type="file" accept="application/json,.json">
+    <div class="btns"><button class="b sec" data-act="importBackup">ייבא גיבוי</button></div>
+    <div class="mut">הקובץ נשאר אצלך. אם מולאה סיסמה, הגיבוי מוצפן במכשיר (AES-GCM). אין שרת. ייבוא מחליף את הנתונים רק אחרי אישור.</div>
+    <div class="btns"><button class="b sec" data-act="loadDemo">טען נתוני הדגמה</button><button class="b danger" data-act="restartOnboarding">התחל אונבורדינג מחדש</button></div></div>`;
 }
 
 function holdingForm(h) {
@@ -475,7 +503,8 @@ document.addEventListener('click', async e => {
       S.risk = { answers, score, profile: score <= 5 ? 'שמרני' : score <= 10 ? 'מאוזן' : 'צמיחה', date: new Date().toISOString().slice(0, 10) }; save(); render(); toast('השאלון נשמר'); },
     saveSettings: () => { S.settings.E_ils = numOrNull('sE'); S.settings.M = numOrNull('sM'); S.settings.cashSince = val('sSince') || null; const r = numOrNull('sR'); S.settings.rRef = r == null ? null : r / 100; save(); render(); toast('נשמר'); },
     importCsv: () => doImport(true), appendCsv: () => doImport(false),
-    export: () => { const b = new Blob([JSON.stringify(S, null, 1)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'portfolio-backup.json'; a.click(); },
+    export: () => doExport(),
+    importBackup: () => doImportBackup(),
     loadDemo: () => { if (!confirm('לטעון נתוני הדגמה? הנתונים השמורים במכשיר יוחלפו.')) return; S = clone(SAMPLE_PORTFOLIO); S.demoChoice = 'keep'; S.onboarded = true; S.onboarding = { active: false }; save(); go('portfolio'); },
     saveVapid: () => { localStorage.setItem('pf.vapidPublic', val('vapidPub')); toast('המפתח נשמר במכשיר'); },
     enablePush: () => enablePush(),
@@ -521,7 +550,43 @@ document.addEventListener('change', e => { if (e.target.id === 'testAmt') { ui.t
 function obRead() {
   const el = document.getElementById('obIn');
   const text = el ? String(el.value).trim() : '';
-  return { text, num: text === '' ? null : Number(text), sel: document.getElementById('obSel')?.value || 'IL' };
+  const symEl = document.getElementById('obSym');
+  const field = id => (document.getElementById(id)?.value || '').trim();
+  return { text, num: text === '' ? null : Number(text), sel: 'IL', sym: symEl ? symEl.value.trim() : '', r0: field('r0'), r1: field('r1'), r2: field('r2') };
+}
+document.addEventListener('input', e => {
+  if (e.target.id !== 'obSym') return;
+  const box = document.getElementById('obSuggest');
+  if (!box) return;
+  box.innerHTML = suggestHtml(e.target.value, document.querySelector('#ob')?.dataset.step === 'cSym');
+});
+async function doExport() {
+  const pass = val('backupPass');
+  const pack = packBackup(S, { vapidPublic: localStorage.getItem('pf.vapidPublic') || undefined });
+  const body = pass ? await encryptBackup(pack, pass) : pack;
+  const how = await shareOrDownload('portfolio-backup.json', JSON.stringify(body, null, 1));
+  toast(how === 'shared' ? 'גיליון השיתוף נפתח' : 'הגיבוי הורד');
+}
+async function doImportBackup() {
+  const file = document.getElementById('backupFile')?.files?.[0];
+  if (!file) return alert('בחר קובץ גיבוי.');
+  let data;
+  try { data = JSON.parse(await file.text()); }
+  catch { return alert('הקובץ אינו JSON תקין.'); }
+  if (data?.enc === 'AES-GCM') {
+    const pass = val('backupPass');
+    if (!pass) return alert('הקובץ מוצפן. הזן את הסיסמה למעלה.');
+    try { data = await decryptBackup(data, pass); }
+    catch { return alert('הסיסמה לא מתאימה או שהקובץ פגום.'); }
+  }
+  const err = validateBackup(data);
+  if (err) return alert(err);
+  if (!confirm('להחליף את כל הנתונים במכשיר בגיבוי הזה?')) return;
+  S = migratePortfolio(portfolioFromBackup(data));
+  if (data.vapidPublic) localStorage.setItem('pf.vapidPublic', data.vapidPublic);
+  save();
+  render();
+  toast('הגיבוי נטען');
 }
 async function onOb(t) {
   if (t.dataset.ob === 'importCsv') {

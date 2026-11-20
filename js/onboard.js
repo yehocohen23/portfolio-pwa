@@ -1,5 +1,6 @@
-// אונבורדינג: שאלה אחת במסך. שומר רק מה שהוזן. אין רשת ואין ברירות מחדל מספריות.
-import { TAX_NOTE } from './logic.js';
+// אונבורדינג: שאלה אחת במסך, העדפה ללחיצה. הכל נשמר רק במכשיר.
+import { RETURN_ASSUMPTIONS, suggestedRiskForYears } from './logic.js';
+import { LISTINGS, CRYPTO } from './listings.js';
 
 export const RISK_Q = [
   ['אם התיק ירד 20% בחודש, מה היית עושה?', ['מוכר הכל', 'מוכר חלק', 'לא עושה כלום', 'קונה עוד']],
@@ -9,7 +10,15 @@ export const RISK_Q = [
   ['כמה חודשי הוצאות יש לך בצד?', ['פחות מחודש', '1–3', '3–6', 'מעל 6']],
 ];
 
+export const GOAL_TYPES = [
+  ['home', 'דירה'], ['trip', 'טיול'], ['retire', 'פרישה מוקדמת'],
+  ['freedom', 'חופש כלכלי'], ['kids', 'ביטחון לילדים'], ['other', 'אחר'],
+];
+const PROVIDERS = ['מגדל', 'הראל', 'כלל', 'מנורה', 'הפניקס', 'אלטשולר שחם', 'מיטב', 'מור', 'ילין לפידות', 'אנליסט', 'אחר'];
+const TRACKS = ['כללי', 'מניות', 'S&P 500', 'מחקה מדד', 'אג״ח', 'לפי גיל', 'הלכה', 'אחר'];
+
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const goalLabel = key => GOAL_TYPES.find(g => g[0] === key)?.[1] || key;
 
 export function emptyPortfolio() {
   return {
@@ -17,13 +26,35 @@ export function emptyPortfolio() {
     onboarded: false,
     onboarding: { active: true, step: 'intro', hist: [] },
     holdings: [],
+    goals: [],
     settings: { E_ils: null, M: null, cashSince: null, rRef: null, rScen: [null, null, null], mode: 'equal' },
     proj: { B0: null, P: null, fd: null, fa: null, years: null, G: null, horizonYear: null },
     journal: [],
     reviewed: {},
     risk: null,
-    profile: { taxResidency: 'IL', materialShareholder: null, employerPlan: null },
+    profile: { taxResidency: 'IL' },
   };
+}
+
+const DEAD_STEPS = new Set(['material', 'employer', 'astsQty', 'goal', 'horizon', 'r0', 'r1', 'r2', 'E', 'M', 'cashSince', 'cashMore', 'hKind', 'hEr', 'hSector', 'hWhy', 'hExit', 'cWhy', 'cExit', 'penFd', 'penFa', 'penP', 'stuFd', 'stuFa', 'stuP']);
+
+export function migratePortfolio(s) {
+  if (!s || typeof s !== 'object') return s;
+  s.holdings = Array.isArray(s.holdings) ? s.holdings : [];
+  s.journal = Array.isArray(s.journal) ? s.journal : [];
+  s.reviewed = s.reviewed || {};
+  s.profile = s.profile || {};
+  s.settings = Object.assign({ E_ils: null, M: null, cashSince: null, rRef: null, rScen: [null, null, null], mode: 'equal' }, s.settings || {});
+  if (!Array.isArray(s.settings.rScen) || s.settings.rScen.length !== 3) s.settings.rScen = [null, null, null];
+  if (!Array.isArray(s.goals)) s.goals = [];
+  if (!s.goals.length && s.proj && (s.proj.G != null || s.proj.horizonYear != null)) {
+    s.goals = [{ id: 'g-legacy', key: 'other', label: 'יעד קודם', amount: s.proj.G ?? null, currency: 'USD', year: s.proj.horizonYear ?? null }];
+  }
+  if (s.onboarding?.active && !s.onboarded && DEAD_STEPS.has(s.onboarding.step)) {
+    s.onboarding.step = 'intro';
+    s.onboarding.hist = [];
+  }
+  return s;
 }
 
 export function mode(S) {
@@ -32,31 +63,40 @@ export function mode(S) {
   return 'app';
 }
 
-const OPTIONAL = new Set(['astsQty', 'goal', 'horizon', 'r0', 'r1', 'r2', 'E', 'M', 'cashSince', 'cashAmt', 'hEr', 'hSector', 'hWhy', 'hExit', 'cWhy', 'cExit', 'csv', 'penProvider', 'penTrack', 'penBal', 'penFd', 'penFa', 'penP', 'stuProvider', 'stuTrack', 'stuBal', 'stuFd', 'stuFa', 'stuP']);
-
 function plan(S) {
   const o = S.onboarding || {};
-  const ids = ['intro', 'tax', 'material', 'employer'];
-  if (S.profile?.employerPlan) ids.push('astsQty');
-  ids.push('goal', 'horizon', 'r0', 'r1', 'r2', 'q0', 'q1', 'q2', 'q3', 'q4', 'E', 'M', 'cashSince', 'cashAmt', 'cashCcy', 'cashMore', 'holdMenu');
-  const d = o.draft;
-  if (d?.phase === 'sec') {
-    ids.push('hKind', 'hSym', 'hQty');
-    if (d.kind === 'etf') ids.push('hEr');
-    ids.push('hSector', 'hWhy', 'hExit');
-  } else if (d?.phase === 'crypto') ids.push('cSym', 'cQty', 'cWhy', 'cExit');
-  else if (d?.phase === 'csv') ids.push('csv');
+  const ids = ['intro', 'tax', 'goals'];
+  (o.goalKeys || []).forEach((_, i) => ids.push('gAmt' + i, 'gCur' + i, 'gYear' + i));
+  ids.push('returns');
+  if (o.editingReturns) ids.push('rEdit');
+  ids.push('q0', 'q1', 'q2', 'q3', 'q4', 'cashAmt', 'cashCcy', 'holdMenu');
+  if (o.draft?.phase === 'sec') ids.push('hSym', 'hQty');
+  else if (o.draft?.phase === 'crypto') ids.push('cSym', 'cQty');
+  else if (o.draft?.phase === 'csv') ids.push('csv');
   ids.push('penAsk');
-  if (o.pen === 'yes') ids.push('penProvider', 'penTrack', 'penBal', 'penFd', 'penFa', 'penP', 'penMore');
+  if (o.pen === 'yes') {
+    ids.push('penProvider');
+    if (o.fund?.provider === 'אחר') ids.push('penProviderText');
+    ids.push('penTrack');
+    if (o.fund?.track === 'אחר') ids.push('penTrackText');
+    ids.push('penBal', 'penMore');
+  }
   ids.push('stuAsk');
-  if (o.stu === 'yes') ids.push('stuProvider', 'stuTrack', 'stuBal', 'stuFd', 'stuFa', 'stuP', 'stuMore');
+  if (o.stu === 'yes') {
+    ids.push('stuProvider');
+    if (o.fund?.provider === 'אחר') ids.push('stuProviderText');
+    ids.push('stuTrack');
+    if (o.fund?.track === 'אחר') ids.push('stuTrackText');
+    ids.push('stuBal', 'stuMore');
+  }
   ids.push('done');
   return ids;
 }
 
-function shell(S, step, { title, note, field, choices, next, skip }) {
+function shell(S, step, { title, note, field, choices, next, skip = true }) {
   const ids = plan(S);
-  const i = Math.max(0, ids.indexOf(step));
+  const at = ids.indexOf(step);
+  const i = at < 0 ? 0 : at;
   const pct = ids.length <= 1 ? 0 : Math.round(i / (ids.length - 1) * 100);
   const o = S.onboarding;
   const back = (o.hist || []).length ? '<button type="button" class="b sec" data-ob="back">חזרה</button>' : '';
@@ -74,190 +114,40 @@ function shell(S, step, { title, note, field, choices, next, skip }) {
   </section>`;
 }
 
-function picks(list, current) {
-  return list.map(([val, label]) => `<button type="button" class="ob-choice${current === val ? ' on' : ''}" data-ob="pick" data-val="${esc(val)}">${esc(label)}</button>`).join('');
+function chips(list, current, act = 'pick') {
+  const many = Array.isArray(current);
+  const set = many ? new Set(current) : null;
+  return `<div class="ob-chips">${list.map(([val, label]) => {
+    const on = many ? set.has(val) : current === val;
+    return `<button type="button" class="ob-choice${on ? ' on' : ''}" data-ob="${act}" data-val="${esc(val)}">${esc(label)}</button>`;
+  }).join('')}</div>`;
 }
-function fieldInput(value, type = 'number') {
-  const dir = type === 'text' || type === 'number' || type === 'date' ? ' dir="ltr"' : '';
-  const mode = type === 'number' ? ' inputmode="decimal"' : '';
-  return `<input id="obIn" aria-labelledby="obQ" type="${type}"${type === 'number' ? ' step="any"' : ''} autocomplete="off"${dir}${mode} value="${esc(value ?? '')}">`;
+function numField(value) {
+  return `<input id="obIn" aria-labelledby="obQ" type="number" step="any" inputmode="decimal" dir="ltr" autocomplete="off" value="${esc(value ?? '')}">`;
 }
-function fieldBox(value) {
-  return `<textarea id="obIn" aria-labelledby="obQ">${esc(value ?? '')}</textarea>`;
+function textField(value, id = 'obIn') {
+  return `<input id="${id}" aria-labelledby="obQ" type="text" dir="ltr" autocomplete="off" value="${esc(value ?? '')}">`;
 }
-const pctShow = x => x == null || !Number.isFinite(x) ? '' : +(x * 100).toFixed(4);
 
-function fundName(kind, provider, track) {
-  const base = kind === 'study' ? 'קרן השתלמות' : 'קרן פנסיה';
-  if (provider && track) return provider + ' — ' + track;
-  if (provider) return provider;
-  if (track) return base + ' — ' + track;
-  return base;
+export function suggestHtml(query, crypto) {
+  const q = String(query || '').trim().toUpperCase();
+  if (!q) return '';
+  const list = crypto ? CRYPTO : LISTINGS;
+  const hits = list.filter(r => r.s.startsWith(q) || r.n.toUpperCase().includes(q)).slice(0, 8);
+  if (!hits.length) return '<div class="mut">אין הצעה ברשימה המקומית. אפשר להמשיך עם הסמל שהוקלד.</div>';
+  return chips(hits.map(r => [r.s, '\u2066' + r.s + ' · ' + r.n + '\u2069']), '', 'pickSym');
+}
+
+function lookup(symbol, crypto) {
+  const s = symbol.toUpperCase();
+  return (crypto ? CRYPTO : LISTINGS).find(r => r.s === s) || null;
 }
 function nid(S) { S.onboarding.seq = (S.onboarding.seq || 0) + 1; return 'h' + S.onboarding.seq; }
-function cashId(S) { return 'ob-cash-' + (S.onboarding.cashI || 0); }
-function penId(S) { return 'ob-pen-' + (S.onboarding.penI || 0); }
-function stuId(S) { return 'ob-stu-' + (S.onboarding.stuI || 0); }
 function upsert(S, h) {
   const i = S.holdings.findIndex(x => x.id === h.id);
-  if (i >= 0) S.holdings[i] = h; else S.holdings.push(h);
+  if (i >= 0) S.holdings[i] = { ...S.holdings[i], ...h }; else S.holdings.push(h);
 }
 function dropPrefix(S, pre) { S.holdings = S.holdings.filter(h => !String(h.id).startsWith(pre)); }
-
-function writeFund(S, kind) {
-  const d = S.onboarding.fund || {};
-  const id = kind === 'study' ? stuId(S) : penId(S);
-  upsert(S, {
-    id, kind, currency: 'ILS',
-    name: fundName(kind, d.provider, d.track),
-    provider: d.provider || undefined,
-    track: d.track || undefined,
-    balance: d.balance == null ? undefined : d.balance,
-    feeDeposit: d.feeDeposit == null ? undefined : d.feeDeposit,
-    feeAccum: d.feeAccum == null ? undefined : d.feeAccum,
-    monthlyDeposit: d.monthlyDeposit == null ? undefined : d.monthlyDeposit,
-  });
-}
-function loadFund(S, kind) {
-  if (S.onboarding.fund) return;
-  const id = kind === 'study' ? stuId(S) : penId(S);
-  const h = S.holdings.find(x => x.id === id) || {};
-  S.onboarding.fund = {
-    provider: h.provider || '', track: h.track || '',
-    balance: h.balance ?? null, feeDeposit: h.feeDeposit ?? null, feeAccum: h.feeAccum ?? null, monthlyDeposit: h.monthlyDeposit ?? null,
-  };
-}
-
-export function renderGate() {
-  return `<section class="ob" id="ob" data-step="gate">
-    <div class="ob-meta">נתונים שנשמרו במכשיר</div>
-    <h2 id="obQ">במכשיר שמורים נתוני הדגמה</h2>
-    <div class="ob-note">אלה לא הנתונים שלך. אפשר להתחיל מחדש עם תמונה ריקה, או להמשיך עם ההדגמה.</div>
-    <button type="button" class="ob-choice" data-ob="fresh">התחל מחדש</button>
-    <button type="button" class="ob-choice" data-ob="keepDemo">המשך עם ההדגמה</button>
-  </section>`;
-}
-
-export function renderOnboard(S) {
-  const step = S.onboarding?.step || 'intro';
-  const o = S.onboarding;
-  const skip = OPTIONAL.has(step);
-  const opt = '<div class="mut">אפשר לדלג. מה שחסר יישאר חסר — לא יומצא מספר.</div>';
-  if (step === 'intro') return shell(S, step, {
-    title: 'נבנה את התמונה שלך',
-    note: 'שאלה אחת בכל מסך. אפשר לחזור אחורה, לדלג על מה שלא חובה, ולהמשיך אחר כך מאותו מקום. אין צורך בשם. הכל נשמר רק במכשיר הזה.',
-    next: { label: 'מתחילים' },
-  });
-  if (step === 'tax') return shell(S, step, {
-    title: 'מה תושבות המס שלך?',
-    note: 'ברירת המחדל: ישראל. זה נשמר אצלך במכשיר בלבד.',
-    field: `<label for="obSel">תושבות מס</label><select id="obSel"><option value="IL"${S.profile.taxResidency !== 'other' ? ' selected' : ''}>ישראל</option><option value="other"${S.profile.taxResidency === 'other' ? ' selected' : ''}>אחר</option></select>`,
-    next: { label: 'המשך' },
-  });
-  if (step === 'material') return shell(S, step, {
-    title: 'האם אתה בעל מניות מהותי בחברה כלשהי?',
-    note: esc(TAX_NOTE),
-    choices: picks([['yes', 'כן — 10% או יותר'], ['no', 'לא']], S.profile.materialShareholder == null ? '' : S.profile.materialShareholder ? 'yes' : 'no'),
-  });
-  if (step === 'employer') return shell(S, step, {
-    title: 'יש לך מניות בתוכנית העובדים של AST SpaceMobile?',
-    note: 'חלון מסחר וכללי אינסיידר של החברה חלים לפני כל פעולה. למניית מעסיק מוצגת ריכוזיות בלבד, בלי הצעת מכירה.',
-    choices: picks([['yes', 'כן'], ['no', 'לא']], S.profile.employerPlan == null ? '' : S.profile.employerPlan ? 'yes' : 'no'),
-  });
-  if (step === 'astsQty') {
-    const h = S.holdings.find(x => x.id === 'ob-asts');
-    return shell(S, step, { title: 'כמה מניות ASTS יש לך?', note: opt, field: fieldInput(h?.qty ?? ''), skip: true, next: { label: 'המשך' } });
-  }
-  if (step === 'goal') return shell(S, step, { title: 'מה סכום היעד בדולרים?', note: 'אופציונלי. ' + opt, field: fieldInput(S.proj?.G ?? ''), skip: true, next: { label: 'המשך' } });
-  if (step === 'horizon') return shell(S, step, { title: 'באיזו שנה היעד?', note: 'למשל 2036. אופציונלי.', field: fieldInput(S.proj?.horizonYear ?? '', 'number'), skip: true, next: { label: 'המשך' } });
-  if (step === 'r0' || step === 'r1' || step === 'r2') {
-    const idx = step === 'r0' ? 0 : step === 'r1' ? 1 : 2;
-    const label = ['שמרני', 'בסיס', 'אופטימי'][idx];
-    const v = S.settings.rScen?.[idx];
-    return shell(S, step, {
-      title: `איזו תשואה שנתית בתרחיש ${label}?`,
-      note: 'באחוזים לשנה, בלי ברירת מחדל. ריק = חסר. תרחיש הבסיס משמש גם לחישובי עלות.',
-      field: fieldInput(v == null ? '' : +(v * 100).toFixed(4)),
-      skip: true, next: { label: 'המשך' },
-    });
-  }
-  if (/^q[0-4]$/.test(step)) {
-    const k = +step.slice(1);
-    const q = RISK_Q[k];
-    const cur = o.qa?.[k];
-    return shell(S, step, { title: q[0], choices: picks(q[1].map((label, j) => [String(j), label]), cur == null ? '' : String(cur)) });
-  }
-  if (step === 'E') return shell(S, step, { title: 'כמה ההוצאה החודשית החיונית שלך?', note: 'בשקלים. בלי זה לא מחושבת קרן חירום.', field: fieldInput(S.settings.E_ils ?? ''), skip: true, next: { label: 'המשך' } });
-  if (step === 'M') return shell(S, step, {
-    title: 'כמה חודשי הוצאות לשמור בצד?',
-    note: 'טווח מקובל: 3 עד 6.',
-    choices: picks([['3', '3'], ['4', '4'], ['5', '5'], ['6', '6']], S.settings.M == null ? '' : String(S.settings.M)),
-    skip: true,
-  });
-  if (step === 'cashSince') return shell(S, step, { title: 'ממתי העודף במזומן יושב בלי ריבית?', note: 'אופציונלי. בלי תאריך לא נספרים הימים.', field: fieldInput(S.settings.cashSince || '', 'date'), skip: true, next: { label: 'המשך' } });
-  if (step === 'cashAmt') {
-    const again = (o.cashI || 0) > 0;
-    const saved = S.holdings.find(h => h.id === 'ob-cash-' + (o.cashI || 0));
-    return shell(S, step, { title: again ? 'כמה עוד מזומן זמין?' : 'כמה מזומן זמין יש לך?', note: 'סכום שלא צובר ריבית. אם אין — דלג.', field: fieldInput(o.pendingCash ?? saved?.balance ?? ''), skip: true, next: { label: 'המשך' } });
-  }
-  if (step === 'cashCcy') return shell(S, step, { title: 'באיזה מטבע המזומן?', choices: picks([['ILS', 'שקל (ILS)'], ['USD', 'דולר (USD)']], '') });
-  if (step === 'cashMore') return shell(S, step, { title: 'יש עוד מזומן?', choices: picks([['yes', 'כן, עוד סכום'], ['no', 'לא']], '') });
-  if (step === 'holdMenu') return shell(S, step, {
-    title: 'מה להוסיף לתיק?',
-    note: 'מניות וקרנות סל בארה״ב, או קריפטו לתצוגה וסיכון בלבד. אפשר גם לייבא CSV.',
-    choices: picks([['stock', 'מניה או קרן סל'], ['crypto', 'קריפטו'], ['csv', 'ייבוא CSV'], ['done', 'סיימתי עם ניירות']], ''),
-  });
-  if (step === 'hKind') return shell(S, step, { title: 'מניה או קרן סל?', choices: picks([['stock', 'מניה'], ['etf', 'קרן סל']], o.draft?.kind || '') });
-  if (step === 'hSym') return shell(S, step, { title: 'מה הסמל?', note: 'למשל AAPL או VOO.', field: fieldInput(o.draft?.symbol || '', 'text'), next: { label: 'המשך' } });
-  if (step === 'hQty') return shell(S, step, { title: 'כמה יחידות?', field: fieldInput(o.draft?.qty ?? ''), next: { label: 'המשך' } });
-  if (step === 'hEr') return shell(S, step, { title: 'מה יחס ההוצאות השנתי?', note: 'באחוזים. 0.03 פירושו 0.03%. דילוג = חסר.', field: fieldInput(pctShow(o.draft?.er)), skip: true, next: { label: 'המשך' } });
-  if (step === 'hSector') return shell(S, step, { title: 'באיזה ענף?', note: opt, field: fieldInput(o.draft?.sector || '', 'text'), skip: true, next: { label: 'המשך' } });
-  if (step === 'hWhy') return shell(S, step, { title: 'למה קניתי?', note: opt, field: fieldBox(o.draft?.thesis || ''), skip: true, next: { label: 'המשך' } });
-  if (step === 'hExit') return shell(S, step, { title: 'מה יגרום לי לצאת?', note: opt, field: fieldBox(o.draft?.exit || ''), skip: true, next: { label: 'המשך' } });
-  if (step === 'cSym') return shell(S, step, { title: 'מה סמל הקריפטו?', note: 'תצוגה וסיכון בלבד. אין כאן המלצת קנייה או מכירה.', field: fieldInput(o.draft?.symbol || '', 'text'), next: { label: 'המשך' } });
-  if (step === 'cQty') return shell(S, step, { title: 'כמה יחידות?', field: fieldInput(o.draft?.qty ?? ''), next: { label: 'המשך' } });
-  if (step === 'cWhy') return shell(S, step, { title: 'למה קניתי?', note: opt, field: fieldBox(o.draft?.thesis || ''), skip: true, next: { label: 'המשך' } });
-  if (step === 'cExit') return shell(S, step, { title: 'מה יגרום לי לצאת?', note: opt, field: fieldBox(o.draft?.exit || ''), skip: true, next: { label: 'המשך' } });
-  if (step === 'csv') return shell(S, step, {
-    title: 'ייבוא CSV מהמכשיר',
-    note: 'הקובץ נקרא כאן בלבד. עמודות: kind, symbol, name, qty, balance, currency, er, feeDeposit, feeAccum, monthlyDeposit, sector, employer, thesis. אחוזים כשבר עשרוני.',
-    field: '<label for="obCsvFile">קובץ</label><input id="obCsvFile" type="file" accept=".csv,text/csv"><label for="obCsv">או הדבקה</label><textarea id="obCsv" dir="ltr"></textarea>',
-    skip: true,
-    next: { act: 'importCsv', label: 'הוסף מהקובץ' },
-  });
-  if (step === 'penAsk') return shell(S, step, { title: 'יש לך קרן פנסיה?', choices: picks([['yes', 'כן'], ['no', 'אין']], '') });
-  if (step === 'stuAsk') return shell(S, step, { title: 'יש לך קרן השתלמות?', choices: picks([['yes', 'כן'], ['no', 'אין']], '') });
-  const fundStep = step.startsWith('pen') ? 'pension' : step.startsWith('stu') ? 'study' : null;
-  if (fundStep && step.endsWith('Provider')) return fundField(S, step, fundStep, 'provider', (o.penI || o.stuI) ? 'מי הגוף המנהל של הקרן הנוספת?' : 'מי הגוף המנהל?');
-  if (fundStep && step.endsWith('Track')) return fundField(S, step, fundStep, 'track', 'מה המסלול?');
-  if (fundStep && step.endsWith('Bal')) return fundField(S, step, fundStep, 'balance', 'מה היתרה בשקלים?');
-  if (fundStep && step.endsWith('Fd')) return fundField(S, step, fundStep, 'feeDeposit', 'כמה דמי ניהול מהפקדה?', 'באחוזים. 1.5 פירושו 1.5%.');
-  if (fundStep && step.endsWith('Fa')) return fundField(S, step, fundStep, 'feeAccum', 'כמה דמי ניהול מהצבירה?', 'באחוזים לשנה. 0.25 פירושו 0.25%.');
-  if (fundStep && step.endsWith('P')) return fundField(S, step, fundStep, 'monthly', 'כמה ההפקדה החודשית בשקלים?');
-  if (step === 'penMore') return shell(S, step, { title: 'יש עוד קרן פנסיה?', choices: picks([['yes', 'כן'], ['no', 'לא']], '') });
-  if (step === 'stuMore') return shell(S, step, { title: 'יש עוד קרן השתלמות?', choices: picks([['yes', 'כן'], ['no', 'לא']], '') });
-  if (step === 'done') return shell(S, step, {
-    title: 'אפשר לראות את התיק',
-    note: 'החישוב משתמש רק במה שהזנת. מה שחסר יסומן כחסר, בלי מספר מומצא. מחירי השוק בקובץ האותות עדיין מדומים.',
-    next: { act: 'finish', label: 'אל התיק' },
-  });
-  return shell(S, 'intro', { title: 'נבנה את התמונה שלך', next: { label: 'מתחילים' } });
-}
-
-function fundField(S, step, kind, key, title, note) {
-  loadFund(S, kind);
-  const d = S.onboarding.fund;
-  let value = '';
-  let type = 'text';
-  if (key === 'provider') value = d.provider || '';
-  else if (key === 'track') value = d.track || '';
-  else if (key === 'balance') { value = d.balance ?? ''; type = 'number'; }
-  else if (key === 'monthly') { value = d.monthlyDeposit ?? ''; type = 'number'; }
-  else if (key === 'feeDeposit') { value = pctShow(d.feeDeposit); type = 'number'; }
-  else if (key === 'feeAccum') { value = pctShow(d.feeAccum); type = 'number'; }
-  return shell(S, step, { title, note: note || 'אפשר לדלג. ערך חסר יישאר חסר.', field: fieldInput(value, type), skip: true, next: { label: 'המשך' } });
-}
-
 function go(S, id) {
   const o = S.onboarding;
   o.err = '';
@@ -275,72 +165,188 @@ function back(S) {
 }
 function fail(S, msg) { S.onboarding.err = msg; return 'stay'; }
 function parsed(read) {
-  if (read.text === '') return { blank: true };
+  if (!read.text) return { blank: true };
   if (!Number.isFinite(read.num)) return { bad: true };
   return { n: read.num };
 }
-function touchProj(S) {
-  if (!S.proj) S.proj = { B0: null, P: null, fd: null, fa: null, years: null, G: null, horizonYear: null };
-  return S.proj;
+function years() {
+  const y = new Date().getFullYear();
+  return Array.from({ length: 20 }, (_, i) => [String(y + 1 + i), String(y + 1 + i)]);
 }
+function goalAt(S, i) {
+  const key = (S.onboarding.goalKeys || [])[i];
+  if (!key) return null;
+  if (!Array.isArray(S.goals)) S.goals = [];
+  let g = S.goals.find(x => x.key === key && String(x.id).startsWith('g-ob-'));
+  if (!g) { g = { id: 'g-ob-' + key, key, label: goalLabel(key) }; S.goals.push(g); }
+  return g;
+}
+function goalIndex(step) {
+  const m = /^g(?:Amt|Cur|Year)(\d+)$/.exec(step);
+  return m ? +m[1] : null;
+}
+function afterGoal(S, i) {
+  const n = (S.onboarding.goalKeys || []).length;
+  return i + 1 < n ? 'gAmt' + (i + 1) : 'returns';
+}
+function fundName(kind, provider, track) {
+  const base = kind === 'study' ? 'קרן השתלמות' : 'קרן פנסיה';
+  if (provider && track && provider !== 'אחר' && track !== 'אחר') return provider + ' — ' + track;
+  if (provider && provider !== 'אחר') return provider;
+  if (track && track !== 'אחר') return base + ' — ' + track;
+  return base;
+}
+function writeFund(S, kind) {
+  const d = S.onboarding.fund || {};
+  const id = (kind === 'study' ? 'ob-stu-' : 'ob-pen-') + (kind === 'study' ? (S.onboarding.stuI || 0) : (S.onboarding.penI || 0));
+  const prev = S.holdings.find(h => h.id === id) || {};
+  const provider = d.provider === 'אחר' ? (d.providerText || '') : d.provider;
+  const track = d.track === 'אחר' ? (d.trackText || '') : d.track;
+  upsert(S, {
+    ...prev, id, kind, currency: 'ILS',
+    name: fundName(kind, provider, track),
+    provider: provider || undefined,
+    track: track || undefined,
+    balance: d.balance == null ? prev.balance : d.balance,
+  });
+}
+
+export function renderGate() {
+  return `<section class="ob" id="ob" data-step="gate">
+    <div class="ob-meta">נתונים שנשמרו במכשיר</div>
+    <h2 id="obQ">במכשיר שמורים נתוני הדגמה</h2>
+    <div class="ob-note">אלה לא הנתונים שלך. אפשר להתחיל מחדש עם תמונה ריקה, או להמשיך עם ההדגמה.</div>
+    <button type="button" class="ob-choice" data-ob="fresh">התחל מחדש</button>
+    <button type="button" class="ob-choice" data-ob="keepDemo">המשך עם ההדגמה</button>
+  </section>`;
+}
+
+export function renderOnboard(S) {
+  const step = S.onboarding?.step || 'intro';
+  const o = S.onboarding;
+  if (step === 'intro') return shell(S, step, {
+    title: 'נבנה את התמונה שלך',
+    note: 'רוב התשובות בלחיצה. אפשר לדלג על כל שאלה ולחזור אחורה. מה שלא יוזן יישאר חסר. אין צורך בשם, והכל נשמר רק במכשיר.',
+    next: { label: 'מתחילים' }, skip: false,
+  });
+  if (step === 'tax') return shell(S, step, {
+    title: 'מה תושבות המס שלך?',
+    note: 'ברירת המחדל: ישראל. דלג שומר את ישראל.',
+    choices: chips([['IL', 'ישראל'], ['other', 'אחר']], S.profile.taxResidency === 'other' ? 'other' : 'IL'),
+    next: { label: 'המשך' },
+  });
+  if (step === 'goals') return shell(S, step, {
+    title: 'מה היעדים שלך?',
+    note: 'אפשר לבחור כמה. אחר כך נשאל סכום ושנה לכל יעד.',
+    choices: chips(GOAL_TYPES, o.goalKeys || [], 'toggle'),
+    next: { label: 'המשך' },
+  });
+  const gi = goalIndex(step);
+  if (gi != null && step.startsWith('gAmt')) {
+    const g = goalAt(S, gi);
+    return shell(S, step, { title: `כמה עולה היעד «${g.label}»?`, field: numField(g.amount ?? ''), next: { label: 'המשך' } });
+  }
+  if (gi != null && step.startsWith('gCur')) {
+    const g = goalAt(S, gi);
+    return shell(S, step, { title: `באיזה מטבע הסכום של «${g.label}»?`, choices: chips([['ILS', 'שקל'], ['USD', 'דולר']], g.currency || '') });
+  }
+  if (gi != null && step.startsWith('gYear')) {
+    const g = goalAt(S, gi);
+    return shell(S, step, { title: `באיזו שנה היעד «${g.label}»?`, choices: chips(years(), g.year == null ? '' : String(g.year)) });
+  }
+  if (step === 'returns') {
+    const a = RETURN_ASSUMPTIONS;
+    return shell(S, step, {
+      title: 'לאשר הנחות תשואה שנתיות?',
+      note: `שמרני ${(a.conservative * 100).toFixed(1)}% · בסיס ${(a.base * 100).toFixed(1)}% · אופטימי ${(a.optimistic * 100).toFixed(1)}%.<br>${esc(a.sourceHe)}<br><span class="mut">נכון ל־${esc(a.date)}. <span class="chip prop">הצעה לאימות</span></span>`,
+      choices: chips([['confirm', 'לאשר את ההנחות'], ['edit', 'לערוך']], ''),
+    });
+  }
+  if (step === 'rEdit') {
+    const rs = S.settings.rScen || [];
+    const show = i => rs[i] == null ? '' : +(rs[i] * 100).toFixed(2);
+    return shell(S, step, {
+      title: 'עריכת שלוש הנחות התשואה',
+      note: 'באחוזים לשנה. שדה ריק = חסר.',
+      field: `<label for="r0">שמרני</label><input id="r0" type="number" step="any" inputmode="decimal" dir="ltr" value="${esc(show(0))}">
+        <label for="r1">בסיס</label><input id="r1" type="number" step="any" inputmode="decimal" dir="ltr" value="${esc(show(1))}">
+        <label for="r2">אופטימי</label><input id="r2" type="number" step="any" inputmode="decimal" dir="ltr" value="${esc(show(2))}">`,
+      next: { label: 'שמור' },
+    });
+  }
+  if (/^q[0-4]$/.test(step)) {
+    const k = +step.slice(1);
+    const q = RISK_Q[k];
+    const cur = o.qa?.[k];
+    return shell(S, step, { title: q[0], choices: chips(q[1].map((label, j) => [String(j), label]), cur == null ? '' : String(cur)) });
+  }
+  if (step === 'cashAmt') return shell(S, step, { title: 'כמה מזומן זמין יש לך?', field: numField(o.pendingCash ?? ''), next: { label: 'המשך' } });
+  if (step === 'cashCcy') return shell(S, step, { title: 'באיזה מטבע המזומן?', choices: chips([['ILS', 'שקל'], ['USD', 'דולר']], '') });
+  if (step === 'holdMenu') return shell(S, step, {
+    title: 'מה להוסיף לתיק?',
+    choices: chips([['stock', 'מניה או קרן סל'], ['crypto', 'קריפטו'], ['csv', 'ייבוא CSV'], ['done', 'סיימתי עם ניירות']], ''),
+  });
+  if (step === 'hSym' || step === 'cSym') {
+    const crypto = step === 'cSym';
+    return shell(S, step, {
+      title: crypto ? 'מה סמל הקריפטו?' : 'מה הסמל?',
+      note: crypto ? 'תצוגה וסיכון בלבד. בחירה מהרשימה המקומית.' : 'הקלד אותיות. NV מציע את NVDA. סוג, ענף ויחס הוצאות יושלמו מהרשימה אם יש, ואחרת יישארו חסרים.',
+      field: textField(o.draft?.symbol || '', 'obSym') + `<div id="obSuggest">${suggestHtml(o.draft?.symbol || '', crypto)}</div>`,
+      next: { label: 'המשך' },
+    });
+  }
+  if (step === 'hQty' || step === 'cQty') return shell(S, step, { title: `כמה יחידות של ${esc(o.draft?.symbol || '')}?`, field: numField(o.draft?.qty ?? ''), next: { label: 'המשך' } });
+  if (step === 'csv') return shell(S, step, {
+    title: 'ייבוא CSV מהמכשיר',
+    note: 'הקובץ נקרא כאן בלבד. עמודות: kind, symbol, name, qty, balance, currency, er, feeDeposit, feeAccum, monthlyDeposit, sector, employer, thesis. אחוזים כשבר עשרוני.',
+    field: '<label for="obCsvFile">קובץ</label><input id="obCsvFile" type="file" accept=".csv,text/csv"><label for="obCsv">או הדבקה</label><textarea id="obCsv" dir="ltr"></textarea>',
+    next: { act: 'importCsv', label: 'הוסף מהקובץ' },
+  });
+  if (step === 'penAsk') return shell(S, step, { title: 'יש לך קרן פנסיה?', choices: chips([['yes', 'כן'], ['no', 'אין']], '') });
+  if (step === 'stuAsk') return shell(S, step, { title: 'יש לך קרן השתלמות?', choices: chips([['yes', 'כן'], ['no', 'אין']], '') });
+  if (step === 'penProvider' || step === 'stuProvider') return shell(S, step, { title: 'מי הגוף המנהל?', choices: chips(PROVIDERS.map(p => [p, p]), o.fund?.provider || '') });
+  if (step === 'penProviderText' || step === 'stuProviderText') return shell(S, step, { title: 'שם הגוף המנהל', field: textField(o.fund?.providerText || '', 'obIn'), next: { label: 'המשך' } });
+  if (step === 'penTrack' || step === 'stuTrack') return shell(S, step, { title: 'מה המסלול?', choices: chips(TRACKS.map(t => [t, t]), o.fund?.track || '') });
+  if (step === 'penTrackText' || step === 'stuTrackText') return shell(S, step, { title: 'שם המסלול', field: textField(o.fund?.trackText || '', 'obIn'), next: { label: 'המשך' } });
+  if (step === 'penBal' || step === 'stuBal') return shell(S, step, { title: 'מה היתרה בשקלים?', field: numField(o.fund?.balance ?? ''), next: { label: 'המשך' } });
+  if (step === 'penMore') return shell(S, step, { title: 'יש עוד קרן פנסיה?', choices: chips([['yes', 'כן'], ['no', 'לא']], '') });
+  if (step === 'stuMore') return shell(S, step, { title: 'יש עוד קרן השתלמות?', choices: chips([['yes', 'כן'], ['no', 'לא']], '') });
+  if (step === 'done') return shell(S, step, {
+    title: 'אפשר לראות את התיק',
+    note: 'החישוב משתמש רק במה שהזנת. מה שחסר יסומן כחסר.',
+    next: { act: 'finish', label: 'אל התיק' }, skip: false,
+  });
+  return shell(S, 'intro', { title: 'נבנה את התמונה שלך', next: { label: 'מתחילים' }, skip: false });
+}
+
 function setRisk(S) {
   const answers = S.onboarding.qa;
-  if (!answers || answers.some(x => x == null)) return;
+  if (!answers || answers.length < 5 || answers.some(x => x == null)) { S.risk = null; return; }
   const score = answers.reduce((s, x) => s + x, 0);
   S.risk = { answers: answers.slice(), score, profile: score <= 5 ? 'שמרני' : score <= 10 ? 'מאוזן' : 'צמיחה', date: new Date().toISOString().slice(0, 10) };
 }
+function applyReturns(S, list) {
+  S.settings.rScen = list;
+  S.settings.rScenMeta = { source: RETURN_ASSUMPTIONS.sourceHe, date: RETURN_ASSUMPTIONS.date, proposal: true };
+}
 function commitSecurity(S) {
   const d = S.onboarding.draft;
-  if (!d?.symbol || !(d.qty > 0) || (d.kind !== 'stock' && d.kind !== 'etf')) return;
+  if (!d?.symbol || !(d.qty > 0)) return;
+  const meta = lookup(d.symbol, false);
   const h = {
-    id: d.id, kind: d.kind, symbol: d.symbol, name: d.symbol, qty: d.qty, currency: 'USD',
-    sector: d.sector || undefined, thesis: d.thesis || undefined, exit: d.exit || undefined,
-    employer: !!(S.profile.employerPlan && d.symbol === 'ASTS'),
+    id: d.id, kind: meta?.k || 'stock', symbol: d.symbol, name: meta?.n || d.symbol, qty: d.qty, currency: 'USD',
+    sector: meta?.sec || undefined,
   };
-  if (d.kind === 'etf') h.er = d.er == null ? undefined : d.er;
-  if (h.symbol === 'ASTS' && h.employer) {
-    const prev = S.holdings.find(x => x.id === 'ob-asts');
-    if (prev && prev.id !== h.id) {
-      Object.assign(prev, h, { id: 'ob-asts' });
-      S.holdings = S.holdings.filter(x => x.id !== h.id);
-      return;
-    }
-  }
+  if (meta?.er != null) h.er = meta.er;
   upsert(S, h);
+  S.onboarding.draft = null;
 }
 function commitCrypto(S) {
   const d = S.onboarding.draft;
   if (!d?.symbol || !(d.qty > 0)) return;
-  upsert(S, { id: d.id, kind: 'crypto', symbol: d.symbol, name: d.symbol, qty: d.qty, currency: 'USD', thesis: d.thesis || undefined, exit: d.exit || undefined });
-}
-
-function fundNext(S, kind, key, read, skip) {
-  loadFund(S, kind);
-  const d = S.onboarding.fund;
-  const last = kind === 'study' ? 'stuMore' : 'penMore';
-  const order = kind === 'study'
-    ? ['stuProvider', 'stuTrack', 'stuBal', 'stuFd', 'stuFa', 'stuP']
-    : ['penProvider', 'penTrack', 'penBal', 'penFd', 'penFa', 'penP'];
-  const step = S.onboarding.step;
-  const nxt = order[order.indexOf(step) + 1] || last;
-  if (key === 'provider' || key === 'track') {
-    d[key] = skip ? '' : read.text;
-  } else if (key === 'balance' || key === 'monthly') {
-    const p = parsed(read);
-    if (p.bad) return fail(S, 'צריך מספר, או דלג');
-    if (p.blank || skip) d[key === 'monthly' ? 'monthlyDeposit' : 'balance'] = null;
-    else if (p.n < 0) return fail(S, 'מספר לא שלילי, או דלג');
-    else d[key === 'monthly' ? 'monthlyDeposit' : 'balance'] = p.n;
-  } else {
-    const p = parsed(read);
-    if (p.bad) return fail(S, 'צריך מספר, או דלג');
-    const prop = key === 'feeDeposit' ? 'feeDeposit' : 'feeAccum';
-    if (p.blank || skip) d[prop] = null;
-    else if (p.n < 0) return fail(S, 'אחוז לא שלילי, או דלג');
-    else d[prop] = p.n / 100;
-  }
-  writeFund(S, kind);
-  return go(S, nxt);
+  const meta = lookup(d.symbol, true);
+  upsert(S, { id: d.id, kind: 'crypto', symbol: d.symbol, name: meta?.n || d.symbol, qty: d.qty, currency: 'USD' });
+  S.onboarding.draft = null;
 }
 
 export function acceptImport(S, rows) {
@@ -350,183 +356,221 @@ export function acceptImport(S, rows) {
   go(S, 'holdMenu');
 }
 
+export { suggestedRiskForYears };
+
 export function onboardAct(S, kind, val, read) {
-  if (!S.profile) S.profile = { taxResidency: 'IL', materialShareholder: null, employerPlan: null };
+  if (!S.profile) S.profile = { taxResidency: 'IL' };
   if (!S.onboarding) S.onboarding = { active: true, step: 'intro', hist: [] };
   if (!S.settings) S.settings = { E_ils: null, M: null, cashSince: null, rRef: null, rScen: [null, null, null], mode: 'equal' };
   if (!S.settings.rScen) S.settings.rScen = [null, null, null];
+  if (!Array.isArray(S.goals)) S.goals = [];
   const step = S.onboarding.step || 'intro';
   if (kind === 'fresh') return 'empty';
   if (kind === 'keepDemo') { S.demoChoice = 'keep'; S.onboarded = true; return 'app'; }
   if (kind === 'back') return back(S);
   if (kind === 'finish') {
-    const p = touchProj(S);
-    S.proj = { B0: null, P: null, fd: null, fa: null, years: p.years ?? null, G: p.G ?? null, horizonYear: p.horizonYear ?? null };
     S.simulated = false;
     S.onboarded = true;
     S.demoChoice = 'fresh';
     S.onboarding = { active: false, step: 'done', hist: [] };
     return 'app';
   }
-  if (kind === 'skip' && !OPTIONAL.has(step)) return fail(S, 'כאן צריך תשובה');
-  if (kind === 'pick') return onPick(S, step, val);
-  return onNext(S, step, kind === 'skip', read);
+  if (kind === 'toggle') {
+    const set = new Set(S.onboarding.goalKeys || []);
+    if (set.has(val)) set.delete(val); else set.add(val);
+    S.onboarding.goalKeys = GOAL_TYPES.map(([k]) => k).filter(k => set.has(k));
+    return 'stay';
+  }
+  if (kind === 'pickSym') return onPick(S, step, val, read);
+  if (kind === 'pick') return onPick(S, step, val, read);
+  if (kind === 'skip') return onSkip(S, step);
+  return onNext(S, step, read);
 }
 
-function onPick(S, step, val) {
-  if (step === 'material') {
-    S.profile.materialShareholder = val === 'yes';
-    return go(S, 'employer');
+function onSkip(S, step) {
+  if (step === 'intro' || step === 'done') return fail(S, 'כאן אין דילוג');
+  if (step === 'tax') { S.profile.taxResidency = 'IL'; return go(S, 'goals'); }
+  if (step === 'goals') { S.onboarding.goalKeys = []; return go(S, 'returns'); }
+  const gi = goalIndex(step);
+  if (gi != null) {
+    const g = goalAt(S, gi);
+    if (step.startsWith('gAmt')) g.amount = null;
+    if (step.startsWith('gCur')) g.currency = null;
+    if (step.startsWith('gYear')) { g.year = null; g.suggestedRisk = null; }
+    if (step.startsWith('gYear')) return go(S, afterGoal(S, gi));
+    if (step.startsWith('gAmt')) return go(S, 'gCur' + gi);
+    return go(S, 'gYear' + gi);
   }
-  if (step === 'employer') {
-    S.profile.employerPlan = val === 'yes';
-    if (!S.profile.employerPlan) S.holdings = S.holdings.filter(h => h.id !== 'ob-asts');
-    return go(S, S.profile.employerPlan ? 'astsQty' : 'goal');
+  if (step === 'returns' || step === 'rEdit') { S.onboarding.editingReturns = false; return go(S, 'q0'); }
+  if (/^q[0-4]$/.test(step)) {
+    const k = +step.slice(1);
+    if (!S.onboarding.qa) S.onboarding.qa = [null, null, null, null, null];
+    S.onboarding.qa[k] = null;
+    setRisk(S);
+    return go(S, k < 4 ? 'q' + (k + 1) : 'cashAmt');
+  }
+  if (step === 'cashAmt') { S.onboarding.pendingCash = null; return go(S, 'holdMenu'); }
+  if (step === 'cashCcy') { S.onboarding.pendingCash = null; return go(S, 'holdMenu'); }
+  if (step === 'hSym' || step === 'cSym' || step === 'hQty' || step === 'cQty') { S.onboarding.draft = null; return go(S, 'holdMenu'); }
+  if (step === 'csv') { S.onboarding.draft = null; return go(S, 'holdMenu'); }
+  if (step === 'penAsk') { S.onboarding.pen = 'no'; return go(S, 'stuAsk'); }
+  if (step === 'stuAsk') { S.onboarding.stu = 'no'; return go(S, 'done'); }
+  if (step === 'penBal' || step === 'stuBal') {
+    if (S.onboarding.fund) S.onboarding.fund.balance = null;
+    writeFund(S, step.startsWith('pen') ? 'pension' : 'study');
+    return go(S, step.startsWith('pen') ? 'penMore' : 'stuMore');
+  }
+  if (step.startsWith('pen')) return go(S, 'penMore');
+  if (step.startsWith('stu')) return go(S, 'stuMore');
+  return go(S, 'done');
+}
+
+function onPick(S, step, val, read) {
+  if (step === 'tax') { S.profile.taxResidency = val === 'other' ? 'other' : 'IL'; return 'stay'; }
+  if (step === 'gCur' || /^gCur\d+$/.test(step)) {
+    const gi = goalIndex(step);
+    goalAt(S, gi).currency = val === 'USD' ? 'USD' : 'ILS';
+    return go(S, 'gYear' + gi);
+  }
+  if (/^gYear\d+$/.test(step)) {
+    const gi = goalIndex(step);
+    const g = goalAt(S, gi);
+    g.year = +val;
+    const left = g.year - new Date().getFullYear();
+    g.suggestedRisk = suggestedRiskForYears(left);
+    return go(S, afterGoal(S, gi));
+  }
+  if (step === 'returns') {
+    if (val === 'edit') {
+      const a = RETURN_ASSUMPTIONS;
+      if (S.settings.rScen.every(x => x == null)) S.settings.rScen = [a.conservative, a.base, a.optimistic];
+      S.onboarding.editingReturns = true;
+      return go(S, 'rEdit');
+    }
+    const a = RETURN_ASSUMPTIONS;
+    applyReturns(S, [a.conservative, a.base, a.optimistic]);
+    return go(S, 'q0');
   }
   if (/^q[0-4]$/.test(step)) {
     const k = +step.slice(1);
     if (!S.onboarding.qa) S.onboarding.qa = [null, null, null, null, null];
     S.onboarding.qa[k] = +val;
     setRisk(S);
-    return go(S, k < 4 ? 'q' + (k + 1) : 'E');
+    return go(S, k < 4 ? 'q' + (k + 1) : 'cashAmt');
   }
-  if (step === 'M') { S.settings.M = +val; return go(S, 'cashSince'); }
   if (step === 'cashCcy') {
-    const amt = S.onboarding.pendingCash ?? S.holdings.find(h => h.id === cashId(S))?.balance;
+    const amt = S.onboarding.pendingCash;
     if (!(amt > 0)) return fail(S, 'חסר סכום');
     const currency = val === 'USD' ? 'USD' : 'ILS';
-    upsert(S, { id: cashId(S), kind: 'cash', name: currency === 'ILS' ? 'מזומן (ILS)' : 'מזומן (USD)', balance: amt, currency });
+    upsert(S, { id: 'ob-cash', kind: 'cash', name: currency === 'ILS' ? 'מזומן (ILS)' : 'מזומן (USD)', balance: amt, currency });
     S.onboarding.pendingCash = null;
-    return go(S, 'cashMore');
-  }
-  if (step === 'cashMore') {
-    if (val === 'yes') { S.onboarding.cashI = (S.onboarding.cashI || 0) + 1; S.onboarding.pendingCash = null; return go(S, 'cashAmt'); }
     return go(S, 'holdMenu');
   }
   if (step === 'holdMenu') {
     if (val === 'done') { S.onboarding.draft = null; return go(S, 'penAsk'); }
     if (val === 'csv') { S.onboarding.draft = { phase: 'csv' }; return go(S, 'csv'); }
     if (val === 'crypto') { S.onboarding.draft = { phase: 'crypto', id: nid(S) }; return go(S, 'cSym'); }
-    S.onboarding.draft = { phase: 'sec', id: nid(S), kind: '' };
-    return go(S, 'hKind');
+    S.onboarding.draft = { phase: 'sec', id: nid(S) };
+    return go(S, 'hSym');
   }
-  if (step === 'hKind') { if (!S.onboarding.draft) return go(S, 'holdMenu'); S.onboarding.draft.kind = val; return go(S, 'hSym'); }
-  if (step === 'penAsk') {
-    if (val === 'no') { dropPrefix(S, 'ob-pen-'); S.onboarding.pen = 'no'; S.onboarding.fund = null; return go(S, 'stuAsk'); }
-    S.onboarding.pen = 'yes';
-    S.onboarding.penI = 0;
+  if ((step === 'hSym' || step === 'cSym') && val) {
+    if (!S.onboarding.draft) return go(S, 'holdMenu');
+    S.onboarding.draft.symbol = val.toUpperCase();
+    return go(S, step === 'hSym' ? 'hQty' : 'cQty');
+  }
+  if (step === 'penAsk' || step === 'stuAsk') {
+    const study = step === 'stuAsk';
+    if (val === 'no') {
+      if (!study) { dropPrefix(S, 'ob-pen-'); S.onboarding.pen = 'no'; S.onboarding.fund = null; return go(S, 'stuAsk'); }
+      dropPrefix(S, 'ob-stu-'); S.onboarding.stu = 'no'; S.onboarding.fund = null; return go(S, 'done');
+    }
+    if (study) { S.onboarding.stu = 'yes'; S.onboarding.stuI = 0; }
+    else { S.onboarding.pen = 'yes'; S.onboarding.penI = 0; }
     S.onboarding.fund = {};
-    return go(S, 'penProvider');
+    return go(S, study ? 'stuProvider' : 'penProvider');
   }
-  if (step === 'penMore') {
-    if (val === 'yes') { S.onboarding.penI = (S.onboarding.penI || 0) + 1; S.onboarding.fund = {}; return go(S, 'penProvider'); }
+  if (step === 'penProvider' || step === 'stuProvider') {
+    S.onboarding.fund.provider = val;
+    S.onboarding.fund.providerText = '';
+    return go(S, val === 'אחר' ? (step.startsWith('pen') ? 'penProviderText' : 'stuProviderText') : (step.startsWith('pen') ? 'penTrack' : 'stuTrack'));
+  }
+  if (step === 'penTrack' || step === 'stuTrack') {
+    S.onboarding.fund.track = val;
+    S.onboarding.fund.trackText = '';
+    return go(S, val === 'אחר' ? (step.startsWith('pen') ? 'penTrackText' : 'stuTrackText') : (step.startsWith('pen') ? 'penBal' : 'stuBal'));
+  }
+  if (step === 'penMore' || step === 'stuMore') {
+    const study = step === 'stuMore';
+    if (val === 'yes') {
+      if (study) S.onboarding.stuI = (S.onboarding.stuI || 0) + 1;
+      else S.onboarding.penI = (S.onboarding.penI || 0) + 1;
+      S.onboarding.fund = {};
+      return go(S, study ? 'stuProvider' : 'penProvider');
+    }
     S.onboarding.fund = null;
-    return go(S, 'stuAsk');
-  }
-  if (step === 'stuAsk') {
-    if (val === 'no') { dropPrefix(S, 'ob-stu-'); S.onboarding.stu = 'no'; S.onboarding.fund = null; return go(S, 'done'); }
-    S.onboarding.stu = 'yes';
-    S.onboarding.stuI = 0;
-    S.onboarding.fund = {};
-    return go(S, 'stuProvider');
-  }
-  if (step === 'stuMore') {
-    if (val === 'yes') { S.onboarding.stuI = (S.onboarding.stuI || 0) + 1; S.onboarding.fund = {}; return go(S, 'stuProvider'); }
-    S.onboarding.fund = null;
-    return go(S, 'done');
+    return go(S, study ? 'done' : 'stuAsk');
   }
   return fail(S, 'בחר אפשרות');
 }
 
-function onNext(S, step, skip, read) {
+function onNext(S, step, read) {
   if (step === 'intro') return go(S, 'tax');
-  if (step === 'tax') { S.profile.taxResidency = read.sel === 'other' ? 'other' : 'IL'; return go(S, 'material'); }
-  if (step === 'astsQty') {
+  if (step === 'tax') { if (S.profile.taxResidency !== 'other') S.profile.taxResidency = 'IL'; return go(S, 'goals'); }
+  if (step === 'goals') {
+    const keys = S.onboarding.goalKeys || [];
+    S.goals = (S.goals || []).filter(g => !String(g.id).startsWith('g-ob-') || keys.includes(g.key));
+    return go(S, keys.length ? 'gAmt0' : 'returns');
+  }
+  if (/^gAmt\d+$/.test(step)) {
+    const gi = goalIndex(step);
     const p = parsed(read);
-    if (skip || p.blank) { S.holdings = S.holdings.filter(h => h.id !== 'ob-asts'); return go(S, 'goal'); }
-    if (p.bad || !(p.n > 0)) return fail(S, 'כמות חיובית, או דלג');
-    upsert(S, { id: 'ob-asts', kind: 'stock', symbol: 'ASTS', name: 'AST SpaceMobile', qty: p.n, currency: 'USD', employer: true });
-    return go(S, 'goal');
+    if (p.bad || p.blank || !(p.n > 0)) return fail(S, 'סכום חיובי, או דלג');
+    goalAt(S, gi).amount = p.n;
+    return go(S, 'gCur' + gi);
   }
-  if (step === 'goal') {
-    const p = parsed(read), proj = touchProj(S);
-    if (skip || p.blank) proj.G = null;
-    else if (p.bad || !(p.n > 0)) return fail(S, 'סכום חיובי, או דלג');
-    else proj.G = p.n;
-    return go(S, 'horizon');
-  }
-  if (step === 'horizon') {
-    const p = parsed(read), proj = touchProj(S);
-    if (skip || p.blank) { proj.horizonYear = null; proj.years = null; }
-    else if (p.bad) return fail(S, 'צריך שנה, או דלג');
-    else {
-      const y = Math.round(p.n), now = new Date().getFullYear();
-      if (y <= now || y > 2100) return fail(S, 'שנה עתידית, למשל ' + (now + 10));
-      proj.horizonYear = y; proj.years = y - now;
-    }
-    return go(S, 'r0');
-  }
-  if (step === 'r0' || step === 'r1' || step === 'r2') {
-    const idx = step === 'r0' ? 0 : step === 'r1' ? 1 : 2;
-    const p = parsed(read);
-    if (skip || p.blank) S.settings.rScen[idx] = null;
-    else if (p.bad) return fail(S, 'צריך מספר, או דלג');
-    else S.settings.rScen[idx] = p.n / 100;
-    return go(S, step === 'r0' ? 'r1' : step === 'r1' ? 'r2' : 'q0');
-  }
-  if (step === 'E') {
-    const p = parsed(read);
-    if (skip || p.blank) S.settings.E_ils = null;
-    else if (p.bad || !(p.n > 0)) return fail(S, 'סכום חיובי, או דלג');
-    else S.settings.E_ils = p.n;
-    return go(S, 'M');
-  }
-  if (step === 'M' && skip) { S.settings.M = null; return go(S, 'cashSince'); }
-  if (step === 'cashSince') {
-    S.settings.cashSince = skip || !read.text ? null : read.text;
-    return go(S, 'cashAmt');
+  if (step === 'rEdit') {
+    const nums = [read.r0, read.r1, read.r2].map(v => v === '' || v == null ? null : Number(v));
+    if (nums.some(n => n != null && !Number.isFinite(n))) return fail(S, 'צריך מספר או שדה ריק');
+    applyReturns(S, nums.map(n => n == null ? null : n / 100));
+    S.onboarding.editingReturns = false;
+    return go(S, 'q0');
   }
   if (step === 'cashAmt') {
     const p = parsed(read);
-    if (skip || p.blank) { S.onboarding.pendingCash = null; return go(S, 'cashMore'); }
-    if (p.bad || !(p.n > 0)) return fail(S, 'סכום חיובי, או דלג');
+    if (p.bad || p.blank || !(p.n > 0)) return fail(S, 'סכום חיובי, או דלג');
     S.onboarding.pendingCash = p.n;
     return go(S, 'cashCcy');
   }
   if (step === 'hSym' || step === 'cSym') {
+    const raw = (read.sym || read.text || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+    if (!raw) return fail(S, 'צריך סמל, או דלג');
     if (!S.onboarding.draft) return go(S, 'holdMenu');
-    const sym = read.text.toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
-    if (!sym) return fail(S, 'צריך סמל');
-    S.onboarding.draft.symbol = sym;
+    S.onboarding.draft.symbol = raw;
     return go(S, step === 'hSym' ? 'hQty' : 'cQty');
   }
   if (step === 'hQty' || step === 'cQty') {
     const p = parsed(read);
-    if (p.bad || !(p.n > 0)) return fail(S, 'צריך כמות חיובית');
+    if (p.bad || !(p.n > 0)) return fail(S, 'צריך כמות חיובית, או דלג');
+    if (!S.onboarding.draft?.symbol) return go(S, 'holdMenu');
     S.onboarding.draft.qty = p.n;
-    if (step === 'cQty') return go(S, 'cWhy');
-    return go(S, S.onboarding.draft.kind === 'etf' ? 'hEr' : 'hSector');
+    if (step === 'hQty') commitSecurity(S); else commitCrypto(S);
+    return go(S, 'holdMenu');
   }
-  if (step === 'hEr') {
+  if (step === 'penProviderText' || step === 'stuProviderText') {
+    S.onboarding.fund.providerText = read.text;
+    return go(S, step.startsWith('pen') ? 'penTrack' : 'stuTrack');
+  }
+  if (step === 'penTrackText' || step === 'stuTrackText') {
+    S.onboarding.fund.trackText = read.text;
+    return go(S, step.startsWith('pen') ? 'penBal' : 'stuBal');
+  }
+  if (step === 'penBal' || step === 'stuBal') {
     const p = parsed(read);
-    if (skip || p.blank) S.onboarding.draft.er = null;
-    else if (p.bad || p.n < 0) return fail(S, 'אחוז לא שלילי, או דלג');
-    else S.onboarding.draft.er = p.n / 100;
-    return go(S, 'hSector');
-  }
-  if (step === 'hSector') { S.onboarding.draft.sector = skip ? '' : read.text; return go(S, 'hWhy'); }
-  if (step === 'hWhy') { S.onboarding.draft.thesis = skip ? '' : read.text; return go(S, 'hExit'); }
-  if (step === 'hExit') { if (!S.onboarding.draft?.symbol) return go(S, 'holdMenu'); S.onboarding.draft.exit = skip ? '' : read.text; commitSecurity(S); return go(S, 'holdMenu'); }
-  if (step === 'cWhy') { S.onboarding.draft.thesis = skip ? '' : read.text; return go(S, 'cExit'); }
-  if (step === 'cExit') { if (!S.onboarding.draft?.symbol) return go(S, 'holdMenu'); S.onboarding.draft.exit = skip ? '' : read.text; commitCrypto(S); return go(S, 'holdMenu'); }
-  if (step === 'csv') { S.onboarding.draft = null; return go(S, 'holdMenu'); }
-  if (step.startsWith('pen') && step !== 'penAsk' && step !== 'penMore') {
-    const key = step === 'penProvider' ? 'provider' : step === 'penTrack' ? 'track' : step === 'penBal' ? 'balance' : step === 'penFd' ? 'feeDeposit' : step === 'penFa' ? 'feeAccum' : 'monthly';
-    return fundNext(S, 'pension', key, read, skip);
-  }
-  if (step.startsWith('stu') && step !== 'stuAsk' && step !== 'stuMore') {
-    const key = step === 'stuProvider' ? 'provider' : step === 'stuTrack' ? 'track' : step === 'stuBal' ? 'balance' : step === 'stuFd' ? 'feeDeposit' : step === 'stuFa' ? 'feeAccum' : 'monthly';
-    return fundNext(S, 'study', key, read, skip);
+    if (p.bad) return fail(S, 'צריך מספר, או דלג');
+    if (!p.blank && p.n < 0) return fail(S, 'מספר לא שלילי, או דלג');
+    S.onboarding.fund.balance = p.blank ? null : p.n;
+    writeFund(S, step === 'penBal' ? 'pension' : 'study');
+    return go(S, step === 'penBal' ? 'penMore' : 'stuMore');
   }
   return fail(S, 'חסרה תשובה');
 }

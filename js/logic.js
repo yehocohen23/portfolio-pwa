@@ -142,6 +142,26 @@ export function requiredDeposit({ G, B0, fd, fa, r, years, mode }) {
 }
 export const idleCostYears = (C, r, n) => C * (Math.pow(1 + r, n) - 1); // §4.3
 
+// טווח תשואה נומינלית למניות ארה״ב ל־10 שנים, לפני אינפלציה, מס והוצאות. לא ערובה.
+// הבסיס הוא אמצע הטווח שפורסם, לא אומדן נפרד של Vanguard.
+export const RETURN_ASSUMPTIONS = {
+  conservative: 0.048,
+  base: 0.058,
+  optimistic: 0.068,
+  date: '2026-09-30',
+  source: 'Vanguard Capital Markets Model®, 10-year annualized nominal U.S. equities 4.8%–6.8% (simulations as of 30 Sep 2026). The base figure is the midpoint of that published range.',
+  sourceHe: 'Vanguard Capital Markets Model®, תשואה שנתית נומינלית צפויה למניות ארה״ב ל־10 שנים: 4.8%–6.8% (סימולציות נכון ל־30.9.2026). הבסיס הוא אמצע הטווח. לפני אינפלציה, מס והוצאות. לא ערובה.',
+};
+
+// אופק קצר → פחות תנודתיות. החתכים 3 ו־7 שנים הם כלל אצבע מסומן הצעה לאימות, לא טבלת Vanguard.
+export function suggestedRiskForYears(yearsLeft) {
+  if (!Number.isFinite(yearsLeft)) return null;
+  const source = 'Vanguard, Principles for Investing Success — אופק קצר מצדיק פחות חשיפה לתנודתיות. חתכי 3 ו־7 שנים: הצעה לאימות, לא התאמה אישית.';
+  if (yearsLeft <= 3) return { level: 'שמרני', why: 'אופק קצר — פחות זמן להתאושש מירידה', source, date: '2023' };
+  if (yearsLeft <= 7) return { level: 'מאוזן', why: 'אופק בינוני', source, date: '2023' };
+  return { level: 'צמיחה', why: 'אופק ארוך — יותר זמן לספוג תנודתיות', source, date: '2023' };
+}
+
 // ---------- עזרי תצוגה ----------
 export function pct(x, d = 1) { return Number.isFinite(x) ? (x * 100).toFixed(d) + '%' : '—'; }
 export function num(x, d = 2) { return Number.isFinite(x) ? x.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d }) : '—'; }
