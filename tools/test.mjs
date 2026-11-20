@@ -1,4 +1,5 @@
 import { chromium, devices } from 'playwright-core';
+import { SAMPLE_PORTFOLIO } from '../js/sample.js';
 const base = 'http://127.0.0.1:8765/';
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, locale: 'he-IL', userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' });
@@ -8,6 +9,7 @@ page.on('pageerror', e => errs.push('pageerror: ' + e.message));
 page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') errs.push(m.type() + ': ' + m.text()); });
 page.on('dialog', d => d.accept());
 const out = process.argv[2] || '/workspace/portfolio-pwa/screenshots';
+await page.addInitScript((data) => localStorage.setItem('pf.v1', JSON.stringify({ ...data, demoChoice: 'keep', onboarded: true })), SAMPLE_PORTFOLIO);
 await page.goto(base); await page.waitForSelector('.big');
 await page.screenshot({ path: out + '/1-portfolio.png' });
 await page.screenshot({ path: out + '/1b-portfolio-full.png', fullPage: true });

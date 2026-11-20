@@ -48,3 +48,19 @@ svg text{fill:var(--mut);font-size:10px}
 .toast{position:fixed;bottom:90px;inset-inline:20px;background:var(--ok);color:#022c22;padding:10px;border-radius:10px;text-align:center;z-index:20;font-weight:600}
 code.wrap{display:block;overflow-wrap:anywhere;font-size:11.5px;margin:4px 0}
 main{overflow-x:hidden}
+body.is-onboard{padding-bottom:0}
+body.is-onboard .tabs,body.is-onboard #moreBtn,body.is-onboard #simBanner{display:none}
+.ob{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+.ob-meta{color:var(--mut);font-size:12.5px}
+.ob-progress{height:6px;background:var(--card2);border-radius:99px;overflow:hidden;margin:8px 0 14px}
+.ob-progress span{display:block;height:100%;background:var(--acc)}
+.ob h2{font-size:22px;line-height:1.35;margin:0 0 8px}
+.ob-note{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;margin:8px 0;font-size:13.5px;color:var(--tx)}
+.ob-choice{display:block;width:100%;text-align:start;margin:8px 0;min-height:48px;padding:12px 14px;border-radius:12px;background:var(--card);color:var(--tx);border:1px solid var(--line);font:inherit;font-size:16px}
+.ob-choice.on{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+.ob-err{color:var(--r);font-size:13.5px;white-space:pre-wrap;min-height:1.2em}
+.ob-actions{position:sticky;bottom:0;display:flex;gap:8px;background:linear-gradient(transparent,var(--bg) 28%);padding:18px 0 calc(8px + env(safe-area-inset-bottom))}
+.ob-actions .b{flex:1;min-height:48px}
+.c0{color:#94a3b8}.c1{color:#38bdf8}.c2{color:#34d399}
+
+.w0{width:0%}.w1{width:1%}.w2{width:2%}.w3{width:3%}.w4{width:4%}.w5{width:5%}.w6{width:6%}.w7{width:7%}.w8{width:8%}.w9{width:9%}.w10{width:10%}.w11{width:11%}.w12{width:12%}.w13{width:13%}.w14{width:14%}.w15{width:15%}.w16{width:16%}.w17{width:17%}.w18{width:18%}.w19{width:19%}.w20{width:20%}.w21{width:21%}.w22{width:22%}.w23{width:23%}.w24{width:24%}.w25{width:25%}.w26{width:26%}.w27{width:27%}.w28{width:28%}.w29{width:29%}.w30{width:30%}.w31{width:31%}.w32{width:32%}.w33{width:33%}.w34{width:34%}.w35{width:35%}.w36{width:36%}.w37{width:37%}.w38{width:38%}.w39{width:39%}.w40{width:40%}.w41{width:41%}.w42{width:42%}.w43{width:43%}.w44{width:44%}.w45{width:45%}.w46{width:46%}.w47{width:47%}.w48{width:48%}.w49{width:49%}.w50{width:50%}.w51{width:51%}.w52{width:52%}.w53{width:53%}.w54{width:54%}.w55{width:55%}.w56{width:56%}.w57{width:57%}.w58{width:58%}.w59{width:59%}.w60{width:60%}.w61{width:61%}.w62{width:62%}.w63{width:63%}.w64{width:64%}.w65{width:65%}.w66{width:66%}.w67{width:67%}.w68{width:68%}.w69{width:69%}.w70{width:70%}.w71{width:71%}.w72{width:72%}.w73{width:73%}.w74{width:74%}.w75{width:75%}.w76{width:76%}.w77{width:77%}.w78{width:78%}.w79{width:79%}.w80{width:80%}.w81{width:81%}.w82{width:82%}.w83{width:83%}.w84{width:84%}.w85{width:85%}.w86{width:86%}.w87{width:87%}.w88{width:88%}.w89{width:89%}.w90{width:90%}.w91{width:91%}.w92{width:92%}.w93{width:93%}.w94{width:94%}.w95{width:95%}.w96{width:96%}.w97{width:97%}.w98{width:98%}.w99{width:99%}.w100{width:100%}

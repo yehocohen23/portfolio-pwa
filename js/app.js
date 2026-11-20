@@ -3,6 +3,7 @@
 import { THRESHOLDS as TH, ANCHORS, TAX_NOTE, classifyDowntrend, concentration, idleCash, projectSeries,
   requiredDeposit, idleCostYears, eventLabel, pct, num, daysBetween } from './logic.js';
 import { SAMPLE_PORTFOLIO, CSV_TEMPLATE } from './sample.js';
+import { emptyPortfolio, mode, renderOnboard, renderGate, onboardAct, acceptImport, RISK_Q } from './onboard.js';
 
 const KEY = 'pf.v1';
 const $ = s => document.querySelector(s);
@@ -20,7 +21,20 @@ let SIG = null;
 let tab = location.hash.slice(1) || 'portfolio';
 const ui = { openReloc: {}, testAmount: 10000 };
 
-function load() { try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.holdings) return s; } catch {} return clone(SAMPLE_PORTFOLIO); }
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(KEY));
+    if (s && Array.isArray(s.holdings)) {
+      s.settings = Object.assign({ E_ils: null, M: null, cashSince: null, rRef: null, rScen: [null, null, null], mode: 'equal' }, s.settings || {});
+      if (!Array.isArray(s.settings.rScen) || s.settings.rScen.length !== 3) s.settings.rScen = [null, null, null];
+      s.journal = s.journal || [];
+      s.reviewed = s.reviewed || {};
+      s.profile = s.profile || {};
+      return s;
+    }
+  } catch {}
+  return emptyPortfolio();
+}
 function save() { localStorage.setItem(KEY, JSON.stringify(S)); }
 function toast(t) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.append(d); setTimeout(() => d.remove(), 1800); }
 const today = () => (SIG?.symbols?.[0]?.closeDate) || new Date().toISOString().slice(0, 10);
@@ -195,6 +209,7 @@ function viewPortfolio(V, A) {
       <div class="row mut"><span>${KIND[i.kind]}${i.qty != null ? ` · ${i.qty} יח׳` : ''} · ${esc(i.currency)}${i.currency === 'ILS' ? ` ₪${num(i.balance, 0)}` : ''}</span>
       <span>${Number.isFinite(i.usd) ? P(i.usd / V.total) : ''} ${flag(i.symbol)} ${i.missing.length ? '<span class="chip miss">חסר נתון</span>' : ''}</span></div>
       ${i.thesis ? `<div class="mut">תזה: ${esc(i.thesis)}</div>` : ''}
+      ${i.exit ? `<div class="mut">יציאה: ${esc(i.exit)}</div>` : ''}
     </div>`).join('')}
     <div class="btns"><button class="b sec" data-act="addHolding">+ הוספה ידנית</button><button class="b sec" data-go="more">ייבוא CSV</button></div>
   </div>
@@ -260,7 +275,9 @@ function viewScreen(V) {
 function viewProjection(V) {
   const st = S.settings, pj = S.proj || (S.proj = { B0: Math.round(V.total), P: 1000, fd: 0, fa: 0.001, years: 20, G: null });
   const rs = st.rScen || [null, null, null];
-  const ready = rs.every(r => r != null);
+  const rReady = rs.every(r => r != null);
+  const ready = rReady && [pj.B0, pj.P, pj.fd, pj.fa].every(Number.isFinite);
+  const pctIn = x => Number.isFinite(x) ? +(x * 100).toFixed(3) : '';
   let out = '';
   if (ready) {
     const series = rs.map(r => projectSeries({ ...pj, r, years: 20, mode: st.mode }));
@@ -275,14 +292,14 @@ function viewProjection(V) {
       <table><tr><th>תרחיש (r שלך)</th><th>10 שנים</th><th>20 שנים</th></tr>
       ${series.map((s, k) => `<tr><td><span class="ltr" data-c="${colors[k]}">■</span> ${['שמרני', 'בסיס', 'אופטימי'][k]} ${P(rs[k])}</td><td>${usd(s[120])}</td><td>${usd(s[240])}</td></tr>`).join('')}</table>
       <div class="small">עלות דמי ניהול ל-20 שנה (תרחיש בסיס): ${usd(noFee[240] - series[1][240])} (${P(1 - series[1][240] / noFee[240])} מהיתרה בלי דמים)</div>
-      ${pj.G ? (() => { const q = requiredDeposit({ ...pj, r: rs[1], years: pj.years, mode: st.mode }); return `<div class="small">יעד ${usd(pj.G)} בעוד ${pj.years} שנים (תרחיש בסיס): ${q.zero ? 'ההפקדה הנדרשת היא אפס בהנחות אלה.' : 'הפקדה חודשית נדרשת ' + usd(q.P)}</div>`; })() : '<div class="mut">לא הוגדר יעד (אופציונלי).</div>'}
+      ${pj.G && Number.isFinite(pj.years) ? (() => { const q = requiredDeposit({ ...pj, r: rs[1], years: pj.years, mode: st.mode }); return `<div class="small">יעד ${usd(pj.G)} בעוד ${pj.years} שנים (תרחיש בסיס): ${q.zero ? 'ההפקדה הנדרשת היא אפס בהנחות אלה.' : 'הפקדה חודשית נדרשת ' + usd(q.P)}</div>`; })() : '<div class="mut">לא הוגדר יעד (אופציונלי).</div>'}
       <div class="tax">זו המחשה חשבונאית לפי הנחת תשואה שנתית שהזנת, לא תחזית ולא הבטחה. אין חישוב «סיכוי להגיע ליעד». תשואה נומינלית; אין התאמה לאינפלציה. ללא מס.</div></div>`;
-  } else out = '<div class="card alert missing"><b>חסר: שלוש הנחות תשואה שאתה קובע.</b><div class="mut">אין תשואת ברירת מחדל סמויה. הזן שמרני / בסיס / אופטימי.</div></div>';
+  } else if (!rReady) out = '<div class="card alert missing"><b>חסר: שלוש הנחות תשואה שאתה קובע.</b><div class="mut">אין תשואת ברירת מחדל סמויה. הזן שמרני / בסיס / אופטימי.</div></div>';
   const f = (id, l, v, step = 'any') => `<div><label for="${id}">${l}</label><input id="${id}" type="number" step="${step}" inputmode="decimal" value="${v ?? ''}"></div>`;
   return `<h2>ריבית דריבית מול היעד</h2>${out}
     <div class="card"><div class="grid2">
       ${f('pB0', 'יתרה נוכחית B0 ($)', pj.B0)}${f('pP', 'הפקדה חודשית P ($)', pj.P)}
-      ${f('pfd', 'דמי ניהול מהפקדה fd (%)', +(pj.fd * 100).toFixed(3))}${f('pfa', 'דמי ניהול מצבירה fa (%/שנה)', +(pj.fa * 100).toFixed(3))}
+      ${f('pfd', 'דמי ניהול מהפקדה fd (%)', pctIn(pj.fd))}${f('pfa', 'דמי ניהול מצבירה fa (%/שנה)', pctIn(pj.fa))}
       ${f('r0', 'r שמרני (%/שנה)', rs[0] != null ? +(rs[0] * 100).toFixed(2) : '')}${f('r1', 'r בסיס (%/שנה)', rs[1] != null ? +(rs[1] * 100).toFixed(2) : '')}
       ${f('r2', 'r אופטימי (%/שנה)', rs[2] != null ? +(rs[2] * 100).toFixed(2) : '')}${f('pG', 'יעד G ($, אופציונלי)', pj.G)}
       ${f('pY', 'שנים ליעד', pj.years, 1)}
@@ -305,16 +322,16 @@ function viewJournal(A) {
 }
 
 function viewMore() {
-  const st = S.settings, rk = S.risk;
-  const Q = [
-    ['אם התיק ירד 20% בחודש, מה היית עושה?', ['מוכר הכל', 'מוכר חלק', 'לא עושה כלום', 'קונה עוד']],
-    ['מתי תצטרך את רוב הכסף?', ['פחות משנתיים', '2–5 שנים', '5–10 שנים', 'מעל 10 שנים']],
-    ['כמה ניסיון יש לך בהשקעות?', ['אין', 'מעט', 'בינוני', 'רב']],
-    ['איזה תיק היית מעדיף לשנה?', ['−5% עד +7%', '−12% עד +18%', '−25% עד +35%', '−45% עד +70%']],
-    ['כמה חודשי הוצאות יש לך בצד?', ['פחות מחודש', '1–3', '3–6', 'מעל 6']],
-  ];
-  return `<h2>שאלון סיכון קצר</h2><div class="card">
-    ${Q.map((q, k) => `<div class="q"><label for="q${k}">${q[0]}</label><select id="q${k}">${q[1].map((o, j) => `<option value="${j}"${rk?.answers?.[k] == j ? ' selected' : ''}>${o}</option>`).join('')}</select></div>`).join('')}
+  const st = S.settings, rk = S.risk, pf = S.profile || {};
+  const yn = v => v == null ? '<span class="chip miss">חסר</span>' : v ? 'כן' : 'לא';
+  const ast = S.holdings.find(h => h.employer && h.symbol === 'ASTS');
+  return `<h2>עליך</h2><div class="card small">
+    <div>תושבות מס: ${pf.taxResidency === 'other' ? 'אחר' : pf.taxResidency === 'IL' ? 'ישראל' : '<span class="chip miss">חסר</span>'}</div>
+    <div>בעל מניות מהותי: ${yn(pf.materialShareholder)}</div>
+    <div>תוכנית עובדים AST SpaceMobile: ${yn(pf.employerPlan)}${pf.employerPlan && !ast ? ' · <span class="chip miss">כמות ASTS חסרה</span>' : ''}</div>
+  </div>
+  <h2>שאלון סיכון קצר</h2><div class="card">
+    ${RISK_Q.map((q, k) => `<div class="q"><label for="q${k}">${q[0]}</label><select id="q${k}">${q[1].map((o, j) => `<option value="${j}"${rk?.answers?.[k] == j ? ' selected' : ''}>${o}</option>`).join('')}</select></div>`).join('')}
     <div class="btns"><button class="b" data-act="saveRisk">שמור</button></div>
     ${rk ? `<div class="small">פרופיל: <b>${esc(rk.profile)}</b> (ציון ${rk.score}/15). <span class="mut">הניקוד הוא בחירה תפעולית, לא כלי מאומת — ${prop.replace(/<[^>]+>/g, '')}.</span></div>` : ''}</div>
   <h2>הגדרות מזומן וקרן חירום</h2><div class="card"><div class="grid2">
@@ -332,7 +349,7 @@ function viewMore() {
     ${Object.values(TH).map(t => `<tr><td>${esc(t.label)}</td><td class="ltr">${Math.abs(t.value) < 1 ? pct(t.value, 0) : t.value}</td><td>${esc(t.src)} ${t.proposal ? prop : t.operational ? '<span class="chip">בחירה תפעולית</span>' : ''}</td></tr>`).join('')}</table></div>
   <h2>פרטיות וגיבוי</h2><div class="card small">
     <ul><li>כל הנתונים נשמרים רק בדפדפן במכשיר הזה. אין שרת, אין חשבון, אין סיסמאות.</li><li>אין חיבור לחשבונות מסחר. האפליקציה רק מנתחת וממליצה.</li><li>קובץ האותות מכיל רשימת סמלים רחבה בלבד; ההצלבה מול הכמויות נעשית כאן.</li></ul>
-    <div class="btns"><button class="b sec" data-act="export">ייצוא גיבוי (JSON)</button><button class="b danger" data-act="reset">איפוס לנתונים המדומים</button></div></div>`;
+    <div class="btns"><button class="b sec" data-act="export">ייצוא גיבוי (JSON)</button><button class="b sec" data-act="loadDemo">טען נתוני הדגמה</button><button class="b danger" data-act="restartOnboarding">התחל אונבורדינג מחדש</button></div></div>`;
 }
 
 function holdingForm(h) {
@@ -346,6 +363,7 @@ function holdingForm(h) {
     ${f('sector', 'ענף')}${f('er', 'יחס הוצאות (0.0003 = 0.03%)', 'number')}${f('feeDeposit', 'דמי ניהול מהפקדה (שבר)', 'number')}${f('feeAccum', 'דמי ניהול מצבירה (שבר)', 'number')}${f('monthlyDeposit', 'הפקדה חודשית', 'number')}</div>
     <label><input type="checkbox" id="f_employer" ${h.employer ? 'checked' : ''}> מניית המעסיק שלי (ריכוזיות כפולה, בלי הצעת פעולה)</label>
     <label for="f_thesis">תזת השקעה — למה אני מחזיק?</label><textarea id="f_thesis">${esc(h.thesis || '')}</textarea>
+    <label for="f_exit">מה יגרום לי לצאת?</label><textarea id="f_exit">${esc(h.exit || '')}</textarea>
     <div class="mut small">שדה ריק = חסר (לא אפס).</div>
     <div class="btns"><button class="b" data-act="saveHolding">שמור</button><button class="b sec" data-act="closeSheet">ביטול</button>${S.holdings.some(x => x.id === h.id) ? '<button class="b danger" data-act="delHolding">מחיקה</button>' : ''}</div>`;
 }
@@ -379,6 +397,9 @@ function parseCsv(text) {
 
 // ---------- רינדור ----------
 function render() {
+  document.body.classList.toggle('is-onboard', mode(S) !== 'app');
+  if (mode(S) === 'gate') { $('#view').innerHTML = renderGate(); return; }
+  if (mode(S) === 'onboard') { $('#view').innerHTML = renderOnboard(S); return; }
   const V = valuate(); const A = buildAlerts(V);
   const n = A.filter(a => a.level === 'red' || a.level === 'yellow' || a.level === 'orange').length;
   $('#badge').hidden = !n; $('#badge').textContent = n;
@@ -386,8 +407,9 @@ function render() {
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   const v = { portfolio: () => viewPortfolio(V, A), alerts: () => viewAlerts(V, A), screen: () => viewScreen(V), projection: () => viewProjection(V), journal: () => viewJournal(A), more: viewMore }[tab] || (() => viewPortfolio(V, A));
   $('#view').innerHTML = v();
-  document.querySelectorAll('[data-w]').forEach(e => e.style.width = Math.min(100, +e.dataset.w) + '%');
-  document.querySelectorAll('[data-c]').forEach(e => e.style.color = e.dataset.c);
+  document.querySelectorAll('[data-w]').forEach(e => e.classList.add('w' + Math.max(0, Math.min(100, Math.round(+e.dataset.w)))));
+  const colorClass = { '#94a3b8': 'c0', '#38bdf8': 'c1', '#34d399': 'c2' };
+  document.querySelectorAll('[data-c]').forEach(e => { const c = colorClass[e.dataset.c]; if (c) e.classList.add(c); });
   render.V = V; render.A = A;
 }
 const go = t => { tab = t; location.hash = t; render(); window.scrollTo(0, 0); };
@@ -404,8 +426,9 @@ function journalEntry(a, decision, note) {
   save();
 }
 
-document.addEventListener('click', e => {
+document.addEventListener('click', async e => {
   const t = e.target.closest('button, [data-hold]'); if (!t) return;
+  if (t.dataset.ob) { await onOb(t); return; }
   if (t.dataset.tab) return go(t.dataset.tab);
   if (t.id === 'moreBtn') return go('more');
   if (t.dataset.go) return go(t.dataset.go);
@@ -418,9 +441,10 @@ document.addEventListener('click', e => {
     addHolding: () => openSheet(holdingForm()),
     closeSheet,
     saveHolding: () => {
-      const h = { id: val('f_id'), kind: val('f_kind'), symbol: val('f_symbol').toUpperCase().replace(/[^A-Z0-9.\-]/g, '') || undefined, name: val('f_name'), currency: val('f_currency'),
+      const prev = S.holdings.find(x => x.id === val('f_id')) || {};
+      const h = { ...prev, id: val('f_id'), kind: val('f_kind'), symbol: val('f_symbol').toUpperCase().replace(/[^A-Z0-9.\-]/g, '') || undefined, name: val('f_name'), currency: val('f_currency'),
         qty: numOrNull('f_qty'), balance: numOrNull('f_balance'), sector: val('f_sector') || undefined, er: numOrNull('f_er'), feeDeposit: numOrNull('f_feeDeposit'), feeAccum: numOrNull('f_feeAccum'),
-        monthlyDeposit: numOrNull('f_monthlyDeposit'), employer: document.getElementById('f_employer').checked, thesis: val('f_thesis') };
+        monthlyDeposit: numOrNull('f_monthlyDeposit'), employer: document.getElementById('f_employer').checked, thesis: val('f_thesis') || undefined, exit: val('f_exit') || undefined };
       const k = S.holdings.findIndex(x => x.id === h.id); if (k >= 0) S.holdings[k] = h; else S.holdings.push(h);
       S.simulated = false; save(); closeSheet(); render(); toast('נשמר במכשיר');
     },
@@ -436,7 +460,8 @@ document.addEventListener('click', e => {
     saveSettings: () => { S.settings.E_ils = numOrNull('sE'); S.settings.M = numOrNull('sM'); S.settings.cashSince = val('sSince') || null; const r = numOrNull('sR'); S.settings.rRef = r == null ? null : r / 100; save(); render(); toast('נשמר'); },
     importCsv: () => doImport(true), appendCsv: () => doImport(false),
     export: () => { const b = new Blob([JSON.stringify(S, null, 1)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'portfolio-backup.json'; a.click(); },
-    reset: () => { if (!confirm('לאפס לנתונים המדומים? הנתונים במכשיר יימחקו.')) return; S = clone(SAMPLE_PORTFOLIO); save(); go('portfolio'); },
+    loadDemo: () => { if (!confirm('לטעון נתוני הדגמה? הנתונים השמורים במכשיר יוחלפו.')) return; S = clone(SAMPLE_PORTFOLIO); S.demoChoice = 'keep'; S.onboarded = true; S.onboarding = { active: false }; save(); go('portfolio'); },
+    restartOnboarding: () => { if (!confirm('להתחיל אונבורדינג מחדש? הנתונים השמורים במכשיר יימחקו.')) return; S = emptyPortfolio(); save(); render(); },
   };
   A[act]?.();
 });
@@ -451,7 +476,28 @@ async function doImport(replace) {
 }
 $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
 document.addEventListener('change', e => { if (e.target.id === 'testAmt') { ui.testAmount = Number(e.target.value) || 0; render(); } });
-window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (h && h !== tab) { tab = h; render(); } });
+function obRead() {
+  const el = document.getElementById('obIn');
+  const text = el ? String(el.value).trim() : '';
+  return { text, num: text === '' ? null : Number(text), sel: document.getElementById('obSel')?.value || 'IL' };
+}
+async function onOb(t) {
+  if (t.dataset.ob === 'importCsv') {
+    try {
+      const file = document.getElementById('obCsvFile')?.files?.[0];
+      const text = file ? await file.text() : (document.getElementById('obCsv')?.value || '');
+      const { out, errs } = parseCsv(text);
+      if (errs.length || !out.length) { S.onboarding.err = errs.length ? errs.join('\n') : 'אין שורות לייבוא'; save(); render(); return; }
+      acceptImport(S, out); save(); render(); toast(`יובאו ${out.length} שורות`);
+    } catch (err) { S.onboarding.err = 'לא ניתן לקרוא את הקובץ'; save(); render(); }
+    return;
+  }
+  const res = onboardAct(S, t.dataset.ob, t.dataset.val, obRead());
+  if (res === 'empty') { S = emptyPortfolio(); save(); render(); return; }
+  if (res === 'app') { save(); tab = 'portfolio'; if (location.hash !== '#portfolio') location.hash = 'portfolio'; render(); return; }
+  save(); render();
+}
+window.addEventListener('hashchange', () => { if (mode(S) !== 'app') return; const h = location.hash.slice(1); if (h && h !== tab) { tab = h; render(); } });
 
 (async function init() {
   try { SIG = await (await fetch('data/signals.json', { cache: 'no-cache' })).json(); }
