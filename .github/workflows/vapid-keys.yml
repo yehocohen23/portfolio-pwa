@@ -1,0 +1,31 @@
+# One-time helper. Prints a new VAPID keypair in THIS job log only.
+# It does not save secrets. Copy them yourself, then delete the log.
+name: Generate VAPID keys
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keys:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Generate and print
+        run: |
+          npm install --prefix "$RUNNER_TEMP/push" web-push
+          node --input-type=module << 'JS'
+          import { pathToFileURL } from 'node:url';
+          const mod = await import(pathToFileURL(process.env.RUNNER_TEMP + '/push/node_modules/web-push/src/index.js').href);
+          const webpush = mod.default || mod;
+          const keys = webpush.generateVAPIDKeys();
+          console.log('Copy these into Settings → Secrets and variables → Actions.');
+          console.log('Do not commit them. Delete this log after you have saved them.');
+          console.log('VAPID_PUBLIC_KEY=' + keys.publicKey);
+          console.log('VAPID_PRIVATE_KEY=' + keys.privateKey);
+          JS

@@ -1,5 +1,5 @@
 # Deploys the static site at the repository root to GitHub Pages.
-# The scanner workflow stays in scanner/workflow-template and is not active.
+# The daily scanner deploys as well, because a bot commit does not start this workflow.
 name: Deploy static content to Pages
 
 on:

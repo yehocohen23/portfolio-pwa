@@ -1,0 +1,63 @@
+# Real daily scan. No portfolio data is read. Secrets are never written into the repo.
+name: daily-scan
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 22 * * 1-5' # 17:30 America/New_York in winter, after the US cash close
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: daily-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Web Push library
+        run: npm install --prefix "$RUNNER_TEMP/push" web-push
+      - name: Build signals.json
+        env:
+          WEB_PUSH_PATH: ${{ runner.temp }}/push/node_modules/web-push
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          PUSH_SUBSCRIPTIONS: ${{ secrets.PUSH_SUBSCRIPTIONS }}
+        run: node scanner/scan.mjs
+      - name: Commit signals.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/signals.json
+          if git diff --cached --quiet; then
+            echo "signals.json unchanged"
+          else
+            git commit -m "Update daily market signals"
+            git push
+          fi
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "."
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

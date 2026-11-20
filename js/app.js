@@ -19,7 +19,7 @@ const KIND = { stock: 'מניה ארה״ב', etf: 'קרן סל ארה״ב', pens
 let S = load();
 let SIG = null;
 let tab = location.hash.slice(1) || 'portfolio';
-const ui = { openReloc: {}, testAmount: 10000 };
+const ui = { openReloc: {}, testAmount: 10000, pushJson: '' };
 
 function load() {
   try {
@@ -258,12 +258,12 @@ function viewScreen(V) {
   const rows = SIG.symbols;
   const cats = [
     { k: 'מומנטום', d: 'עשירון עליון של 12-1 (Jegadeesh & Titman 1993)', f: r => r.decile === 10 },
-    { k: 'ערך', d: `מכפיל רווח < 15 ${prop} (פונדמנטלס מדומים)`, f: r => r.fund?.pe < 15 },
-    { k: 'צמיחה', d: `צמיחת הכנסות > 25% בשנה ${prop} (מדומה)`, f: r => r.fund?.revGrowth > 0.25 },
+    { k: 'ערך', d: `מכפיל רווח < 15 ${prop}. אם אין נתון בקובץ — חסר, לא הומצא`, f: r => r.fund?.pe < 15 },
+    { k: 'צמיחה', d: `צמיחת הכנסות > 25% בשנה ${prop}. אם אין נתון בקובץ — חסר, לא הומצא`, f: r => r.fund?.revGrowth > 0.25 },
     { k: 'מחיר נמוך מאוד', d: `מחיר < $10 ${prop}. אין סף מאומת ל«מניית אלף אחוז»`, f: r => r.lastClose < 10 },
   ];
   const amt = ui.testAmount;
-  return `<div class="card small"><b>סריקה ראשונית של השוק הרחב (${SIG.universeSize} סמלים בדוגמה)</b>
+  return `<div class="card small"><b>סריקה ראשונית של השוק הרחב (${SIG.universeSize} סמלים)</b>
     <div class="mut">כל תוצאה ראשונית. סריקה בלי יקום שכולל מניות שנמחקו משחזרת הטיית שרידות; ריבוי מסננים = סכנת חיטוט בנתונים. אין הבטחת תשואה. קריפטו לא נסרק.</div>
     <label>סכום לבדיקת השפעת ריכוזיות ($)</label><input id="testAmt" type="number" inputmode="decimal" value="${amt}"></div>
     ${cats.map(c => { const list = rows.filter(c.f).slice(0, 8); return `<h2>${c.k} <span class="chip">ראשוני</span></h2><div class="mut small">${c.d}</div><div class="card">
@@ -347,6 +347,19 @@ function viewMore() {
     <div class="btns"><button class="b" data-act="importCsv">החלף את התיק בייבוא</button><button class="b sec" data-act="appendCsv">הוסף לתיק</button></div></div>
   <h2>ספים בשימוש</h2><div class="card"><table><tr><th>סף</th><th>ערך</th><th>מקור</th></tr>
     ${Object.values(TH).map(t => `<tr><td>${esc(t.label)}</td><td class="ltr">${Math.abs(t.value) < 1 ? pct(t.value, 0) : t.value}</td><td>${esc(t.src)} ${t.proposal ? prop : t.operational ? '<span class="chip">בחירה תפעולית</span>' : ''}</td></tr>`).join('')}</table></div>
+  <h2>התראות דחיפה</h2><div class="card small">
+    <p>באייפון זה עובד מ־iOS 16.4, ורק אחרי שהאפליקציה נוספה למסך הבית ונפתחת מהאייקון. ההרשאה חייבת לבוא מלחיצה.</p>
+    <ol>
+      <li>הדבק את המפתח הציבורי (VAPID) שמופיע בלוג של GitHub Actions.</li>
+      <li>לחץ «הפעל התראות» ואשר.</li>
+      <li>העתק את המינוי והדבק אותו בעצמך כסוד <span class="ltr">PUSH_SUBSCRIPTIONS</span> בגיטהאב. המינוי לא כולל כמויות, סכומים או שם.</li>
+    </ol>
+    <label for="vapidPub">מפתח ציבורי</label><input id="vapidPub" dir="ltr" autocomplete="off" value="${esc(localStorage.getItem('pf.vapidPublic') || '')}">
+    <div class="btns"><button class="b sec" data-act="saveVapid">שמור מפתח במכשיר</button><button class="b" data-act="enablePush">הפעל התראות</button></div>
+    <label for="pushSub">מינוי להעתקה (JSON)</label><textarea id="pushSub" dir="ltr" readonly>${esc(ui.pushJson || '')}</textarea>
+    <div class="btns"><button class="b sec" data-act="copyPush">העתק את המינוי</button></div>
+    <div class="mut">ההודעה שתגיע היא כללית: «יש עדכון משמעותי בתיק — פתח את האפליקציה». הפירוט מחושב כאן במכשיר.</div>
+  </div>
   <h2>פרטיות וגיבוי</h2><div class="card small">
     <ul><li>כל הנתונים נשמרים רק בדפדפן במכשיר הזה. אין שרת, אין חשבון, אין סיסמאות.</li><li>אין חיבור לחשבונות מסחר. האפליקציה רק מנתחת וממליצה.</li><li>קובץ האותות מכיל רשימת סמלים רחבה בלבד; ההצלבה מול הכמויות נעשית כאן.</li></ul>
     <div class="btns"><button class="b sec" data-act="export">ייצוא גיבוי (JSON)</button><button class="b sec" data-act="loadDemo">טען נתוני הדגמה</button><button class="b danger" data-act="restartOnboarding">התחל אונבורדינג מחדש</button></div></div>`;
@@ -403,7 +416,10 @@ function render() {
   const V = valuate(); const A = buildAlerts(V);
   const n = A.filter(a => a.level === 'red' || a.level === 'yellow' || a.level === 'orange').length;
   $('#badge').hidden = !n; $('#badge').textContent = n;
-  $('#simBanner').hidden = !(S.simulated || SIG.simulated);
+  const banner = $('#simBanner');
+  if (S.simulated && !SIG.simulated) { banner.hidden = false; banner.textContent = 'כמויות הדגמה במכשיר — המחירים בקובץ האותות אמיתיים, זה לא התיק שלך'; }
+  else if (S.simulated || SIG.simulated) { banner.hidden = false; banner.textContent = 'נתונים מדומים — לא מחירים, דיווחים או יתרות אמיתיים'; }
+  else banner.hidden = true;
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   const v = { portfolio: () => viewPortfolio(V, A), alerts: () => viewAlerts(V, A), screen: () => viewScreen(V), projection: () => viewProjection(V), journal: () => viewJournal(A), more: viewMore }[tab] || (() => viewPortfolio(V, A));
   $('#view').innerHTML = v();
@@ -461,10 +477,36 @@ document.addEventListener('click', async e => {
     importCsv: () => doImport(true), appendCsv: () => doImport(false),
     export: () => { const b = new Blob([JSON.stringify(S, null, 1)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'portfolio-backup.json'; a.click(); },
     loadDemo: () => { if (!confirm('לטעון נתוני הדגמה? הנתונים השמורים במכשיר יוחלפו.')) return; S = clone(SAMPLE_PORTFOLIO); S.demoChoice = 'keep'; S.onboarded = true; S.onboarding = { active: false }; save(); go('portfolio'); },
+    saveVapid: () => { localStorage.setItem('pf.vapidPublic', val('vapidPub')); toast('המפתח נשמר במכשיר'); },
+    enablePush: () => enablePush(),
+    copyPush: async () => { const t = val('pushSub'); if (!t) return toast('אין מינוי עדיין'); try { await navigator.clipboard.writeText(t); toast('המינוי הועתק'); } catch { toast('סמן את הטקסט והעתק'); } },
     restartOnboarding: () => { if (!confirm('להתחיל אונבורדינג מחדש? הנתונים השמורים במכשיר יימחקו.')) return; S = emptyPortfolio(); save(); render(); },
   };
-  A[act]?.();
+  await A[act]?.();
 });
+function vapidKeyBytes(b64) {
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob(b64.replace(/-/g, '+').replace(/_/g, '/') + pad);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+async function enablePush() {
+  const pub = val('vapidPub') || localStorage.getItem('pf.vapidPublic') || '';
+  if (!pub) return alert('הדבק קודם את המפתח הציבורי.');
+  localStorage.setItem('pf.vapidPublic', pub);
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  if (!standalone) alert('באייפון ההתראות מגיעות רק כשפותחים מהאייקון במסך הבית. אפשר להמשיך ולהפעיל גם כך.');
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || typeof Notification === 'undefined') return alert('הדפדפן הזה לא תומך בהתראות דחיפה.');
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') return alert('ההרשאה לא ניתנה.');
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidKeyBytes(pub) });
+  ui.pushJson = JSON.stringify(sub.toJSON());
+  render();
+  try { await navigator.clipboard.writeText(ui.pushJson); toast('המינוי הועתק'); }
+  catch { toast('המינוי מוכן להעתקה'); }
+}
 async function doImport(replace) {
   const file = document.getElementById('csvFile').files[0];
   const text = file ? await file.text() : val('csvText');

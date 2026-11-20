@@ -1,14 +1,26 @@
-# סורק יומי — STUB
+# סורק יומי
 
-לא פעיל, לא מחובר לשום API, לא נפרס. כרגע `node scanner/scan.mjs` (או `simulate.mjs`) מייצר את
-`data/signals.json` מנתונים מדומים לגמרי.
+רץ ב-GitHub Actions (`.github/workflows/daily-scan.yml`) אחרי סגירת המסחר בארה״ב, וגם ידנית עם workflow_dispatch.
+הסורק קורא רק רשימת סמלים ציבורית. אין כאן כמויות, סכומים, אחוזים או שם.
 
-- `universe.txt` — רשימת סריקה רחבה (69 סמלים בדוגמה). הסמלים מהתיק מוסתרים בה; אין כמויות/סכומים.
-- `simulate.mjs` — מחולל מחירים מדומים (seed קבוע) ומחשב אותות לפי `js/logic.js` (אותה לוגיקה שהאפליקציה משתמשת בה).
-- `scan.mjs` — נקודת כניסה עתידית ל-GitHub Actions. במצב לא-חי קורא ל-simulate.
-- `workflow-template/daily-scan.yml` — תבנית workflow, לא בתיקיית `.github`, לכן לא תרוץ.
+- מחירים: Yahoo Finance, בלי מפתח. אם סמל נכשל ויש `FINNHUB_API_KEY`, ננסה את Finnhub.
+- שער דולר/שקל: בנק ישראל. קריפטו (BTC, ETH): CoinGecko.
+- דיווחים: SEC EDGAR רק אם הוגדר `SEC_USER_AGENT`. בלי זה האירועים נשארים חסרים ולא מומצאים.
+- האותות הטכניים (T1–T3, ירידה מהשיא, עשירונים) מחושבים ב-`js/logic.js`, אותו מודול של האפליקציה.
+- הפלט `data/signals.json` עולה לאתר. הטלפון מוריד את כל הקובץ ומצליב אותו מקומית מול התיק.
 
-## סכמת signals.json (schema 1)
-`{ generatedAt, simulated, technicalAsOf, fx{USDILS,date,source}, crypto{BTC,ETH}, symbols:[{ symbol, lastClose, prevClose, closeDate, asOf, r12_1, r12, sma10m, t1, t2, t3, dd, peak252, decile, events:[{type,date,source}], form4:[{code,plan10b51,date,note,source}], fund{pe,revGrowth} }] }`
+התראת דחיפה נשלחת רק אם הופיע דגל אדום חדש ברשימה הציבורית, או אם SPY זז ביום ב-3% ומעלה.
+הטקסט תמיד: «יש עדכון משמעותי בתיק — פתח את האפליקציה». בלי סמלים ובלי סכומים.
 
-האפליקציה מורידה את הקובץ ומצליבה מקומית מול הכמויות שבמכשיר.
+סודות (Settings → Secrets and variables → Actions), כולם אצל הבעלים:
+
+| שם | חובה? |
+| --- | --- |
+| `SEC_USER_AGENT` | כן, כדי שדיווחי SEC ייקראו |
+| `VAPID_PUBLIC_KEY` | כן, כדי לשלוח התראות |
+| `VAPID_PRIVATE_KEY` | כן, כדי לשלוח התראות |
+| `PUSH_SUBSCRIPTIONS` | כן, אחרי שהטלפון נרשם |
+| `FINNHUB_API_KEY` | לא. רק גיבוי למחיר שנכשל |
+| `VAPID_SUBJECT` | לא. ברירת מחדל היא כתובת mailto ציבורית |
+
+מפתחות VAPID: Actions → Generate VAPID keys → Run workflow. המפתח הפרטי מופיע רק בלוג. מעתיקים לסודות ומוחקים את הלוג.
