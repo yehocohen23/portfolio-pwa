@@ -1,0 +1,8 @@
+kind,symbol,name,qty,balance,currency,er,feeDeposit,feeAccum,monthlyDeposit,sector,employer,thesis
+etf,VOO,Vanguard S&P 500 ETF,20,,USD,0.0003,,,,מדד רחב ארה״ב,,ליבה (דוגמה)
+stock,NVDA,NVIDIA,50,,USD,,,,,טכנולוגיה,,דוגמה
+stock,ASTS,AST SpaceMobile,1000,,USD,,,,,תקשורת לוויינית,yes,מניות עובד
+pension,,קרן פנסיה (דוגמה),,300000,ILS,,0.01,0.0022,2000,,,
+study,,קרן השתלמות (דוגמה),,90000,ILS,,0,,,,,
+crypto,BTC,Bitcoin,0.05,,USD,,,,,,,
+cash,,עו״ש,,20000,ILS,,,,,,,

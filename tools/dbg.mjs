@@ -1,0 +1,10 @@
+import { chromium } from 'playwright-core';
+const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+const page = await ctx.newPage();
+await page.goto('http://127.0.0.1:8765/#more'); await page.waitForSelector('#q1');
+await page.selectOption('#q1', '3');
+const b = await page.$('[data-act=saveRisk]'); console.log(await b.boundingBox());
+await page.waitForTimeout(500); console.log(await b.boundingBox(), await page.evaluate(()=>[scrollY, document.body.scrollHeight, innerWidth, document.documentElement.scrollWidth]));
+await page.screenshot({ path: '/tmp/dbg.png' });
+await browser.close();

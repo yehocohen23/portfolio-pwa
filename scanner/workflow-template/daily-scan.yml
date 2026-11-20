@@ -1,0 +1,24 @@
+# STUB — לא פעיל. יועתק ל-.github/workflows/ בריפו הפרטי של יהונתן רק אחרי אישורו.
+# מפתחות API יישמרו כ-GitHub Secrets בחשבון שלו, לא בקוד.
+name: daily-scan
+on:
+  workflow_dispatch: {}
+  # schedule:
+  #   - cron: '30 22 * * 1-5'   # אחרי סגירת וול סטריט (UTC)
+permissions:
+  contents: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Scan broad universe (stub — no real API calls yet)
+        run: node scanner/scan.mjs
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
+      - name: Publish signals.json
+        run: echo "TODO: commit data/signals.json / publish to Pages"

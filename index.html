@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="התיק שלי">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="styles.css">
+<title>ניתוח תיק — אבטיפוס</title>
+</head>
+<body>
+<header class="top">
+  <div>
+    <div class="title">ניתוח תיק</div>
+    <div class="sub">ניתוח והמלצה בלבד — ללא מסחר וללא העברות</div>
+  </div>
+  <button id="moreBtn" class="iconbtn" aria-label="עוד">⚙︎</button>
+</header>
+<div id="simBanner" class="sim">נתונים מדומים — לא מחירים, דיווחים או יתרות אמיתיים</div>
+<main id="view"></main>
+<nav class="tabs" id="tabs">
+  <button data-tab="portfolio">תיק</button>
+  <button data-tab="alerts">התראות<span id="badge" class="badge" hidden></span></button>
+  <button data-tab="screen">סריקה</button>
+  <button data-tab="projection">תחזית</button>
+  <button data-tab="journal">יומן</button>
+</nav>
+<div id="sheet" class="sheet" hidden><div class="sheet-body" id="sheetBody"></div></div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
