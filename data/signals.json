@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "generatedAt": "2026-11-26T04:18:30.521Z",
+ "generatedAt": "2026-11-27T04:25:51.816Z",
  "simulated": false,
  "notice": "מחירים יומיים אמיתיים (Yahoo Finance). שער הדולר: בנק ישראל. SEC EDGAR submissions. 8-K 4.01/4.02/5.02 נקראו ל-530 סמלים. טופס 4 והפתעת רווח לא נסרקו. going concern לא נסרק (אין שדה מובנה בלי קריאת המסמך המלא).",
  "technicalAsOf": "2026-10-30",
@@ -16,19 +16,19 @@
   "earningsSurprise": "not_obtainable"
  },
  "fx": {
-  "USDILS": 3.38,
-  "date": "2026-11-25",
+  "USDILS": 3.334,
+  "date": "2026-11-26",
   "source": "בנק ישראל, שער יציג (PublicApi/GetExchangeRates)"
  },
  "crypto": {
   "BTC": {
-   "usd": 60895,
-   "date": "2026-11-25",
+   "usd": 61438,
+   "date": "2026-11-26",
    "source": "CoinGecko simple price, no API key"
   },
   "ETH": {
-   "usd": 1701.08,
-   "date": "2026-11-25",
+   "usd": 1730.61,
+   "date": "2026-11-26",
    "source": "CoinGecko simple price, no API key"
   },
   "source": "CoinGecko simple price, no API key"
